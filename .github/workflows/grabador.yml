@@ -33,7 +33,7 @@ jobs:
 
       - name: Verificar directo, grabar por bloques de 1h y hacer relevo
         env:
-          STREAMER: "illojuan" # <-- AQUÍ PONES EL NOMBRE EXACTO DEL CANAL DE TWITCH
+          STREAMER: "cristinini" # <-- AQUÍ PONES EL NOMBRE EXACTO DEL CANAL DE TWITCH
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
