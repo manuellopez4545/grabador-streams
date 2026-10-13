@@ -3,11 +3,14 @@ name: Grabador de Twitch a Drive
 on:
   schedule:
     - cron: '*/15 * * * *' # Revisa automáticamente cada 15 minutos
-  workflow_dispatch: # Te permite encenderlo con un botón manual cuando quieras
+  workflow_dispatch: # Botón manual para iniciarlo cuando quieras
 
 concurrency:
   group: grabando-twitch
-  cancel-in-progress: false # Evita que se abran 2 grabaciones al mismo tiempo
+  cancel-in-progress: false
+
+env:
+  STREAMER: "tei" # <-- NOMBRE EXACTO DEL CANAL DE TWITCH
 
 jobs:
   grabar:
@@ -15,13 +18,13 @@ jobs:
     timeout-minutes: 350 # Casi 6 horas por turno
 
     steps:
-      - name: Instalar herramientas en la computadora de GitHub
+      - name: 1. Instalar herramientas
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3-pip
           pip3 install streamlink
 
-      - name: Conectar con tu Google Drive de 1TB
+      - name: 2. Conectar con tu Google Drive
         env:
           TOKEN: ${{ secrets.RCLONE_TOKEN }}
         run: |
@@ -31,42 +34,58 @@ jobs:
           echo "scope = drive" >> ~/.config/rclone/rclone.conf
           echo "token = $TOKEN" >> ~/.config/rclone/rclone.conf
 
-      - name: Verificar directo, grabar por bloques de 1h y hacer relevo
-        env:
-          STREAMER: "cristinini" # <-- AQUÍ PONES EL NOMBRE EXACTO DEL CANAL DE TWITCH
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+      - name: 3. Grabar el directo
         run: |
-          # 1. Revisar si está en vivo
+          # Verificar si está en vivo
           if ! streamlink https://www.twitch.tv/$STREAMER best --stream-url > /dev/null 2>&1; then
-            echo "El canal no está en vivo en este momento. Saliendo..."
+            echo "El canal no está en vivo en este momento."
             exit 0
           fi
 
-          echo "¡Está en vivo! Iniciando grabación en máxima calidad..."
+          echo "¡En vivo! Grabando..."
           mkdir -p grabaciones
           FECHA=$(date +"%Y-%m-%d_%H-%M")
 
-          # 2. Proceso en segundo plano que sube cada bloque terminado a Drive
+          # Subidor en segundo plano (va subiendo bloques de 1 hora por si el stream es muy largo)
           (
             while true; do
               sleep 30
-              # Busca partes que ya cerraron (más de 1 minuto sin modificarse) y las sube
-              find grabaciones/ -name "*.mp4" -mmin +1 -exec rclone move {} mi_drive:StreamsTwitch/$STREAMER/ \;
+              for archivo in $(find grabaciones/ -name "*.ts" -mmin +1); do
+                nombre_mp4="${archivo%.ts}.mp4"
+                ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
+                rclone move "$nombre_mp4" mi_drive:StreamsTwitch/$STREAMER/
+              done
             done
           ) &
-          SUBIDOR_PID=$!
+          
+          # Graba hasta por 5 horas en formato .ts (resistente a cortes manuales)
+          timeout 18000s bash -c "streamlink https://www.twitch.tv/$STREAMER best -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${STREAMER}_${FECHA}_Parte_%02d.ts" || true
 
-          # 3. Graba durante 5 horas (18000 segundos) dividiendo en videos de 1 hora (3600s)
-          timeout 18000s bash -c "streamlink https://www.twitch.tv/$STREAMER best -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${STREAMER}_${FECHA}_Parte_%02d.mp4" || true
+      - name: 4. Subir video a Drive al terminar o cancelar el workflow
+        if: always() # <-- ESTO HACE LA MAGIA: Se ejecuta aunque tú detengas el workflow manualmente
+        run: |
+          echo "Cerrando grabación y subiendo archivos restantes a Google Drive..."
+          if [ -d "grabaciones" ]; then
+            # Convertir cualquier pedazo .ts restante a .mp4 para que se pueda ver bien en Drive
+            for archivo in grabaciones/*.ts; do
+              [ -e "$archivo" ] || continue
+              nombre_mp4="${archivo%.ts}.mp4"
+              ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
+            done
+            
+            # Subir todo a tu Google Drive
+            rclone move grabaciones/ mi_drive:StreamsTwitch/$STREAMER/
+            echo "¡Subida completada con éxito!"
+          fi
 
-          # 4. Detener el vigilante y subir el último pedazo que haya quedado
-          kill $SUBIDOR_PID || true
-          rclone move grabaciones/ mi_drive:StreamsTwitch/$STREAMER/
-
-          # 5. CARRERA DE RELEVOS: Si después de 5 horas sigue en directo, llama al siguiente robot
+      - name: 5. Relevo automático (Solo si terminó por tiempo de 5h y no porque tú lo cancelaste)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
           if streamlink https://www.twitch.tv/$STREAMER best --stream-url > /dev/null 2>&1; then
-            echo "El directo sigue activo tras 5 horas. Llamando al robot de relevo..."
+            echo "El directo sigue en vivo tras 5 horas. Iniciando relevo..."
             curl -X POST -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $GH_TOKEN" \
               https://api.github.com/repos/$REPO/actions/workflows/grabador.yml/dispatches \
