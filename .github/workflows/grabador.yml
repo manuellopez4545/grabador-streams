@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  STREAMER: "tei" # <-- NOMBRE EXACTO DEL CANAL DE TWITCH
+  STREAMER: "cristinini" # <-- NOMBRE EXACTO DEL CANAL DE TWITCH
 
 jobs:
   grabar:
