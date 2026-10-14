@@ -1,0 +1,15 @@
+[
+  {
+    "id": "demo_inicial",
+    "streamer": "tei",
+    "avatar": "https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png",
+    "titulo": "Stream de Prueba - Audio Original Sin Copyright (1080p60)",
+    "categoria": "Just Chatting",
+    "fecha": "2026-10-14 10:30:00",
+    "duracion": "00:08:00",
+    "calidad": "1080p60",
+    "miniatura": "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80",
+    "drive_id": "",
+    "url_directa": "https://drive.google.com"
+  }
+]
