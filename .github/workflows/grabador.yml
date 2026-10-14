@@ -9,7 +9,7 @@ on:
         default: ''
 
 env:
-  STREAMER_DEFAULT: "manuel0pez_" # <-- PON AQUÍ TU CANAL O EL DEL STREAMER
+  STREAMER_DEFAULT: "illojuan" # <-- PON AQUÍ TU CANAL O EL DEL STREAMER
   TZ: "America/Bogota"
 
 jobs:
