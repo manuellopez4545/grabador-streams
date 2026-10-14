@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  STREAMER_DEFAULT: "tei" # <-- TU CANAL PREDETERMINADO
+  STREAMER_DEFAULT: "manuel0pez_" # <-- TU CANAL PREDETERMINADO
   TZ: "America/Bogota"    # <-- HORA DE COLOMBIA
 
 jobs:
