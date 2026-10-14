@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamRecorder - Archivo Automático de Streams Sin Copyright</title>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0b0c14;
+      --bg-sidebar: #0f101a;
+      --bg-card: #151726;
+      --bg-card-hover: #1c1f33;
+      --bg-input: #1a1c2e;
+      --accent: #6c5ce7;
+      --accent-hover: #5b4bc4;
+      --accent-light: #a29bfe;
+      --text-muted: #8b90b2;
+      --border-color: rgba(255, 255, 255, 0.07);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Lexend', sans-serif;
+      background-color: var(--bg-dark);
+      color: #ffffff;
+      margin: 0;
+      overflow-x: hidden;
+    }
+    .vista-seccion { display: none; min-height: 100vh; }
+    .vista-seccion.activa { display: block; }
+
+    /* Botones y Utilidades */
+    .btn-purple {
+      background: linear-gradient(135deg, #6c5ce7, #8e44ad);
+      border: none;
+      color: #fff;
+      border-radius: 50px;
+      padding: 0.55rem 1.4rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .btn-purple:hover { opacity: 0.92; transform: translateY(-1px); color: #fff; }
+    .btn-outline-purple {
+      background: transparent;
+      border: 1.5px solid var(--accent);
+      color: #fff;
+      border-radius: 50px;
+      padding: 0.55rem 1.4rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .btn-outline-purple:hover { background: rgba(108, 92, 231, 0.15); color: #fff; }
+
+    /* ================= VISTA 1: LANDING PUBLICA ================= */
+    .navbar-landing {
+      background: rgba(11, 12, 20, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.9rem 0;
+    }
+    .brand-logo {
+      font-weight: 700;
+      font-size: 1.35rem;
+      color: #fff;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .hero-landing {
+      padding: 4.5rem 0 3rem;
+      text-align: center;
+      background: radial-gradient(circle at 50% 0%, rgba(108, 92, 231, 0.22) 0%, transparent 60%);
+    }
+    .search-pill {
+      max-width: 600px;
+      margin: 2rem auto 0;
+      background: var(--bg-card);
+      border: 1px solid rgba(162, 155, 254, 0.35);
+      border-radius: 50px;
+      padding: 0.4rem 0.5rem 0.4rem 1.3rem;
+      display: flex;
+      align-items: center;
+    }
+    .search-pill input {
+      background: transparent;
+      border: none;
+      color: #fff;
+      width: 100%;
+      outline: none;
+      font-size: 0.92rem;
+    }
+
+    /* ================= VISTA 2: LOGIN & REGISTRO (SPLIT SCREEN) ================= */
+    .auth-wrapper {
+      display: flex;
+      min-height: 100vh;
+    }
+    .auth-left {
+      flex: 1;
+      max-width: 580px;
+      padding: 2.5rem 3.5rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: var(--bg-dark);
+    }
+    .auth-right {
+      flex: 1;
+      background: linear-gradient(135deg, rgba(11, 12, 20, 0.7), rgba(108, 92, 231, 0.25)),
+                  url('https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1400&q=80') center/cover;
+      position: relative;
+      display: none;
+    }
+    @media (min-width: 992px) { .auth-right { display: block; } }
+    .auth-input {
+      background: var(--bg-input);
+      border: 1px solid var(--border-color);
+      color: #fff;
+      border-radius: 50px;
+      padding: 0.75rem 1.3rem;
+      width: 100%;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .auth-input:focus { border-color: var(--accent); }
+    .social-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: #fff;
+      border-radius: 50px;
+      padding: 0.65rem;
+      width: 100%;
+      font-size: 0.88rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: background 0.2s;
+    }
+    .social-btn:hover { background: var(--bg-card-hover); }
+
+    /* ================= VISTA 3 Y 4: DASHBOARD & RECORDINGS LAYOUT ================= */
+    .app-header {
+      height: 66px;
+      background: var(--bg-sidebar);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-search {
+      background: var(--bg-input);
+      border: 1px solid var(--border-color);
+      border-radius: 50px;
+      padding: 0.38rem 1rem;
+      width: 360px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-search input {
+      background: transparent;
+      border: none;
+      color: #fff;
+      width: 100%;
+      outline: none;
+      font-size: 0.85rem;
+    }
+    .app-body {
+      display: flex;
+      min-height: calc(100vh - 66px);
+    }
+    .app-sidebar {
+      width: 240px;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border-color);
+      padding: 1.5rem 0.8rem;
+      flex-shrink: 0;
+    }
+    .nav-item-side {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0.7rem 1rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-item-side:hover, .nav-item-side.active {
+      background: rgba(108, 92, 231, 0.16);
+      color: #ffffff;
+    }
+    .nav-item-side.active i { color: var(--accent-light); }
+    .app-content {
+      flex: 1;
+      padding: 1.8rem;
+      max-width: 1600px;
+    }
+
+    /* KPI Stat Cards (4 cajas superiores) */
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.2rem 1.4rem;
+    }
+    .kpi-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+    .kpi-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    /* Tarjetas de Video (Grid) */
+    .vod-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: all 0.22s ease;
+      cursor: pointer;
+      height: 100%;
+    }
+    .vod-card:hover {
+      transform: translateY(-4px);
+      background: var(--bg-card-hover);
+      border-color: var(--accent);
+    }
+    .vod-thumb {
+      position: relative;
+      aspect-ratio: 16/9;
+      background: #000;
+      overflow: hidden;
+    }
+    .vod-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .badge-twitch {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: #9146ff;
+      color: #fff;
+      font-size: 0.7rem;
+      padding: 3px 7px;
+      border-radius: 5px;
+      font-weight: 600;
+    }
+    .badge-rec {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: #e74c3c;
+      color: #fff;
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-weight: 700;
+      animation: pulso 1.5s infinite;
+    }
+    @keyframes pulso { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    .badge-duration {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      font-size: 0.74rem;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .vod-info { padding: 0.9rem; }
+    .streamer-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid var(--accent);
+      flex-shrink: 0;
+    }
+    .vod-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .badge-cat {
+      background: rgba(46, 204, 113, 0.15);
+      color: #2ecc71;
+      border: 1px solid rgba(46, 204, 113, 0.3);
+      font-size: 0.68rem;
+      padding: 2px 8px;
+      border-radius: 50px;
+    }
+    .badge-res {
+      background: rgba(231, 76, 60, 0.18);
+      color: #ff7675;
+      border: 1px solid rgba(231, 76, 60, 0.35);
+      font-size: 0.68rem;
+      padding: 2px 8px;
+      border-radius: 50px;
+    }
+
+    /* Acordeón de Streamers (Vista List de Recordings) */
+    .filter-bar {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.2rem;
+      margin-bottom: 1.5rem;
+    }
+    .streamer-accordion {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      margin-bottom: 0.8rem;
+      overflow: hidden;
+    }
+    .streamer-row {
+      padding: 0.9rem 1.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .streamer-row:hover { background: var(--bg-card-hover); }
+    .streamer-drawer {
+      display: none;
+      padding: 1.2rem;
+      border-top: 1px solid var(--border-color);
+      background: rgba(11, 12, 20, 0.5);
+    }
+    .streamer-drawer.abierto { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- =====================================================================
+       VISTA 1: PÁGINA DE INICIO PÚBLICA (LANDING PAGE)
+  ====================================================================== -->
+  <div id="vista-landing" class="vista-seccion activa">
+    <nav class="navbar-landing sticky-top">
+      <div class="container d-flex justify-content-between align-items-center">
+        <a class="brand-logo" href="#" onclick="cambiarVista('vista-landing')">
+          <span class="brand-icon"><i class="fa-solid fa-play"></i></span>
+          <span>stream<span style="color:var(--accent-light)">recorder</span></span>
+        </a>
+        <div class="d-flex align-items-center gap-3">
+          <a href="#" class="text-light text-decoration-none small d-none d-md-inline" onclick="cambiarVista('vista-app'); mostrarTab('tab-dashboard')">Dashboard</a>
+          <a href="#" class="text-light text-decoration-none small d-none d-md-inline" onclick="cambiarVista('vista-app'); mostrarTab('tab-recordings')">Recordings</a>
+          <button class="btn-outline-purple btn-sm px-3" onclick="cambiarVista('vista-auth'); modoAuth('login')">Sign In</button>
+          <button class="btn-purple btn-sm px-3" onclick="cambiarVista('vista-app')">Ir al Panel</button>
+        </div>
+      </div>
+    </nav>
+
+    <section class="hero-landing container">
+      <span class="badge rounded-pill px-3 py-2 mb-3" style="background:rgba(108,92,231,0.2); color:var(--accent-light); border:1px solid var(--accent);">
+        <i class="fa-solid fa-bolt me-1"></i> Archivo Automático 100% Gratuito y Sin Silencios de Copyright
+      </span>
+      <h1 class="display-5 fw-bold">Live Stream Recorder<br><span style="color:var(--accent-light)">and VOD Archive</span></h1>
+      <p class="text-secondary mt-2">Grabación automática en directo alojada en la nube con audio original intacto (1080p60).</p>
+
+      <div class="search-pill">
+        <i class="fa-brands fa-twitch text-primary me-2"></i>
+        <input type="text" id="landingSearch" placeholder="Introduce el nombre del streamer o busca un directo..." oninput="sincronizarBusqueda(this.value)">
+        <button class="btn-purple btn-sm" onclick="cambiarVista('vista-app'); mostrarTab('tab-recordings')">Buscar</button>
+      </div>
+    </section>
+
+    <section class="container mb-5">
+      <div class="row g-3 text-center">
+        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)" id="landTotalVods">0</div><div class="small text-secondary">VODs Archivados</div></div></div>
+        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)">1080p60</div><div class="small text-secondary">Calidad Original</div></div></div>
+        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)">100%</div><div class="small text-secondary">Música Sin Silenciar</div></div></div>
+        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)">24/7</div><div class="small text-secondary">Vigilante Activo</div></div></div>
+      </div>
+    </section>
+
+    <section class="container pb-5">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold m-0">Latest Recordings</h4>
+        <button class="btn-outline-purple btn-sm" onclick="cambiarVista('vista-app'); mostrarTab('tab-recordings')">Ver Todos los Archivos <i class="fa-solid fa-arrow-right ms-1"></i></button>
+      </div>
+      <div class="row g-4" id="landingGridVideos"></div>
+    </section>
+  </div>
+
+  <!-- =====================================================================
+       VISTA 2: LOGIN Y REGISTRO (PANTALLA DIVIDIDA SIN PREMIUM)
+  ====================================================================== -->
+  <div id="vista-auth" class="vista-seccion">
+    <div class="auth-wrapper">
+      <div class="auth-left">
+        <div>
+          <a href="#" class="text-light text-decoration-none small d-inline-flex align-items-center gap-2 mb-4" onclick="cambiarVista('vista-landing')">
+            <i class="fa-solid fa-chevron-left"></i> Back to Home
+          </a>
+
+          <div class="mt-2 mb-4">
+            <span class="brand-icon mb-3" style="width:42px; height:42px; font-size:1.2rem;"><i class="fa-solid fa-play"></i></span>
+            <h2 class="fw-bold mb-2" id="authTitulo">Sign in to Streamrecorder</h2>
+            <p class="text-secondary small" id="authSubtitulo">
+              ¡Bienvenido de nuevo! Inicia sesión en tu cuenta para acceder al panel completo de grabaciones y gestionar tus canales vigilados gratis.
+            </p>
+          </div>
+
+          <form onsubmit="procesarLogin(event)">
+            <div class="mb-3">
+              <input type="text" id="authUser" class="auth-input" placeholder="Username" required>
+            </div>
+            <div class="mb-3" id="campoEmailRegistro" style="display:none;">
+              <input type="email" id="authEmail" class="auth-input" placeholder="E-mail">
+            </div>
+            <div class="mb-3 position-relative">
+              <input type="password" id="authPass" class="auth-input" placeholder="Password" required>
+              <i class="fa-regular fa-eye position-absolute text-secondary" style="right:18px; top:14px; cursor:pointer;" onclick="togglePassword()"></i>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-4 small">
+              <label class="d-flex align-items-center gap-2 text-secondary" style="cursor:pointer;">
+                <input type="checkbox" checked class="form-check-input m-0"> Remember me
+              </label>
+              <a href="#" class="text-light text-decoration-none">Trouble logging in?</a>
+            </div>
+
+            <div class="d-flex gap-2 flex-column mb-4">
+              <button type="button" class="social-btn" onclick="entrarDirecto('Usuario Google')">
+                <i class="fa-brands fa-google text-danger"></i> Continue with Google
+              </button>
+              <button type="button" class="social-btn" onclick="entrarDirecto('Usuario Discord')">
+                <i class="fa-brands fa-discord" style="color:#5865F2;"></i> Continue with Discord
+              </button>
+            </div>
+
+            <div class="d-flex gap-3">
+              <button type="submit" class="btn-purple flex-grow-1 py-2" id="btnSubmitAuth">Login</button>
+              <button type="button" class="btn-outline-purple flex-grow-1 py-2" id="btnToggleAuth" onclick="alternarModoAuth()">Create New Account</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="d-flex justify-content-between text-secondary small pt-4 border-top border-secondary border-opacity-10">
+          <span>StreamRecorder Archive 2026</span>
+          <span>100% Free Open Cloud</span>
+        </div>
+      </div>
+      <div class="auth-right"></div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       VISTA 3 Y 4: APLICACIÓN INTERNA (DASHBOARD + RECORDINGS)
+  ====================================================================== -->
+  <div id="vista-app" class="vista-seccion">
+    <!-- Barra Superior -->
+    <header class="app-header">
+      <div class="d-flex align-items-center gap-4">
+        <a class="brand-logo" href="#" onclick="cambiarVista('vista-landing')">
+          <span class="brand-icon"><i class="fa-solid fa-play"></i></span>
+          <span class="d-none d-sm-inline">stream<span style="color:var(--accent-light)">recorder</span></span>
+        </a>
+        <div class="header-search d-none d-md-flex">
+          <i class="fa-solid fa-magnifying-glass text-secondary"></i>
+          <input type="text" id="globalSearchInput" placeholder="Enter stream link or streamer name..." oninput="filtrarTodo(this.value)">
+        </div>
+      </div>
+
+      <div class="d-flex align-items-center gap-3">
+        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2 rounded-pill small">
+          <i class="fa-solid fa-circle-check me-1"></i> Google Drive 1TB Conectado
+        </span>
+        <div class="d-flex align-items-center gap-2" style="cursor:pointer;" onclick="cambiarVista('vista-auth')">
+          <div class="rounded-circle bg-primary d-flex align-items-center justify-content-center fw-bold" style="width:35px; height:35px;" id="userInitial">M</div>
+          <span class="small fw-medium d-none d-lg-inline" id="userNameDisplay">Manuel</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <!-- Menú Lateral Izquierdo (Sin planes de pago) -->
+      <aside class="app-sidebar d-none d-md-block">
+        <a class="nav-item-side active" id="menu-dashboard" onclick="mostrarTab('tab-dashboard')">
+          <i class="fa-solid fa-gauge-high"></i> Dashboard
+        </a>
+        <a class="nav-item-side" id="menu-recordings" onclick="mostrarTab('tab-recordings')">
+          <i class="fa-solid fa-video"></i> Recordings
+        </a>
+        <a class="nav-item-side" id="menu-monitored" onclick="mostrarTab('tab-monitored')">
+          <i class="fa-solid fa-tower-broadcast"></i> Monitored Streamers
+        </a>
+        <hr class="border-secondary border-opacity-25 my-3">
+        <a class="nav-item-side" href="https://github.com/manuellopez4545/grabador-streams/actions" target="_blank">
+          <i class="fa-brands fa-github"></i> Robot GitHub Actions
+        </a>
+        <a class="nav-item-side" onclick="cambiarVista('vista-landing')">
+          <i class="fa-solid fa-house"></i> Volver al Inicio
+        </a>
+      </aside>
+
+      <!-- Contenido Principal -->
+      <main class="app-content">
+        <!-- 4 Tarjetas KPI Superiores (Comunes a Dashboard y Recordings) -->
+        <div class="row g-3 mb-4">
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Total Recordings</div>
+              <div class="kpi-value" id="kpiTotal">0</div>
+            </div>
+          </div>
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Current Recordings</div>
+              <div class="kpi-value text-success" id="kpiActivas">Auto (24/7)</div>
+            </div>
+          </div>
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Calidad de Captura</div>
+              <div class="kpi-value" style="color:var(--accent-light)">1080p60</div>
+            </div>
+          </div>
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Streamers Monitored</div>
+              <div class="kpi-value" id="kpiStreamers">1</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= SUB-TAB 1: DASHBOARD ================= -->
+        <div id="tab-dashboard" class="sub-tab">
+          <!-- Sección: Currently Recording / Estado en Vivo -->
+          <div class="mb-5">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold m-0"><i class="fa-solid fa-circle text-danger me-2 small"></i>Currently Monitored & Recording</h5>
+              <a href="https://github.com/manuellopez4545/grabador-streams/actions" target="_blank" class="btn-outline-purple btn-sm">
+                <i class="fa-solid fa-bolt me-1"></i> Forzar Grabación Manual en GitHub
+              </a>
+            </div>
+            <div class="row g-4" id="dashboardLiveBox"></div>
+          </div>
+
+          <!-- Sección: Latest Recordings -->
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold m-0">Latest Recordings</h5>
+              <button class="btn btn-sm text-secondary" onclick="mostrarTab('tab-recordings')">Ver todos <i class="fa-solid fa-chevron-right ms-1"></i></button>
+            </div>
+            <div class="row g-4" id="dashboardLatestGrid"></div>
+          </div>
+        </div>
+
+        <!-- ================= SUB-TAB 2: RECORDINGS (CON FILTROS Y ACORDEONES) ================= -->
+        <div id="tab-recordings" class="sub-tab" style="display:none;">
+          <!-- Barra de Filtros idéntica a Recordings - StreamRecorder.pdf -->
+          <div class="filter-bar">
+            <div class="row g-3 align-items-end">
+              <div class="col-12 col-md-4">
+                <label class="small text-secondary mb-1">Search recordings</label>
+                <div class="header-search w-100">
+                  <i class="fa-solid fa-magnifying-glass text-secondary"></i>
+                  <input type="text" id="recSearchInput" placeholder="Buscar por streamer, título o fecha..." oninput="renderizarSeccionRecordings()">
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="small text-secondary mb-1">Sort by</label>
+                <select id="recSortBy" class="form-select bg-dark border-secondary border-opacity-25 text-light rounded-pill form-select-sm py-2 px-3" onchange="renderizarSeccionRecordings()">
+                  <option value="recent">Most Recent</option>
+                  <option value="name">Streamer Name (A-Z)</option>
+                  <option value="count">Most Recordings</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="small text-secondary mb-1">Recording Sort</label>
+                <select id="recOrder" class="form-select bg-dark border-secondary border-opacity-25 text-light rounded-pill form-select-sm py-2 px-3" onchange="renderizarSeccionRecordings()">
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-2 text-md-end">
+                <label class="small text-secondary mb-1 d-block">View</label>
+                <div class="btn-group" role="group">
+                  <button type="button" id="btnViewGrid" class="btn btn-sm btn-outline-secondary px-3" onclick="cambiarModoVistaRec('grid')">
+                    <i class="fa-solid fa-grip"></i> Grid
+                  </button>
+                  <button type="button" id="btnViewList" class="btn btn-sm btn-purple px-3" onclick="cambiarModoVistaRec('list')">
+                    <i class="fa-solid fa-list"></i> List
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex gap-4 mt-3 pt-2 border-top border-secondary border-opacity-10 small">
+              <label class="d-flex align-items-center gap-2 text-light" style="cursor:pointer;">
+                <input type="checkbox" id="chkDownloadBtns" checked class="form-check-input m-0" onchange="renderizarSeccionRecordings()">
+                <i class="fa-solid fa-download text-primary"></i> Download Buttons
+              </label>
+              <span class="text-secondary ms-auto" id="textoContadorRec">0 grabaciones encontradas</span>
+            </div>
+          </div>
+
+          <!-- Contenedor Dinámico (Acordeones por Streamer o Grilla) -->
+          <div id="contenedorRecordingsVista"></div>
+        </div>
+
+        <!-- ================= SUB-TAB 3: MONITORED STREAMERS ================= -->
+        <div id="tab-monitored" class="sub-tab" style="display:none;">
+          <div class="kpi-card mb-4">
+            <h5 class="fw-bold mb-2"><i class="fa-brands fa-twitch text-primary me-2"></i>Canales Vigilados 24/7</h5>
+            <p class="text-secondary small mb-3">
+              El robot revisa cada 2 minutos si alguno de tus canales configurados está en directo y respalda automáticamente el video en tu carpeta <code>StreamsTwitch</code> de Google Drive.
+            </p>
+            <div id="listaCanalesMonitoreados" class="row g-3"></div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL REPRODUCTOR DE VIDEO INTEGRADO
+  ====================================================================== -->
+  <div class="modal fade" id="reproductorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+        <div class="modal-header border-secondary border-opacity-25">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-primary"><i class="fa-brands fa-twitch me-1"></i>VOD Sin Copyright</span>
+            <h6 class="modal-title fw-bold m-0" id="modalTitulo">Reproduciendo Stream</h6>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0 bg-black">
+          <div class="ratio ratio-16x9" id="contenedorIframe"></div>
+        </div>
+        <div class="modal-footer border-secondary border-opacity-25 d-flex justify-content-between">
+          <span class="text-secondary small" id="modalMeta"></span>
+          <a href="#" id="modalBotonDrive" target="_blank" class="btn-purple btn-sm text-decoration-none">
+            <i class="fa-solid fa-cloud-arrow-down me-2"></i>Abrir / Descargar MP4 en Google Drive
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let videosGlobal = [];
+    let vistaRecActual = 'list'; // 'list' (acordeón como tu PDF) o 'grid'
+    let modoAuthActual = 'login';
+
+    // 1. Cargar datos desde videos.json
+    async function inicializarApp() {
+      const usuarioGuardado = localStorage.getItem('sr_user');
+      if (usuarioGuardado) {
+        document.getElementById('userNameDisplay').innerText = usuarioGuardado;
+        document.getElementById('userInitial').innerText = usuarioGuardado.charAt(0).toUpperCase();
+      }
+
+      try {
+        const res = await fetch('videos.json?t=' + Date.now());
+        videosGlobal = await res.json();
+      } catch (e) {
+        videosGlobal = [];
+      }
+      actualizarTodoUI();
+    }
+
+    function actualizarTodoUI() {
+      const streamersUnicos = [...new Set(videosGlobal.map(v => v.streamer))];
+      document.getElementById('landTotalVods').innerText = videosGlobal.length;
+      document.getElementById('kpiTotal').innerText = videosGlobal.length;
+      document.getElementById('kpiStreamers').innerText = streamersUnicos.length || 1;
+
+      // Renderizar Landing Grid
+      document.getElementById('landingGridVideos').innerHTML = videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true)).join('');
+
+      // Renderizar Dashboard Latest Grid
+      document.getElementById('dashboardLatestGrid').innerHTML = videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true)).join('');
+
+      // Renderizar Tarjeta de Canal Vigilado en Dashboard
+      const canalPrincipal = streamersUnicos[0] || 'tei';
+      const avatarPrincipal = videosGlobal[0]?.avatar || 'https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png';
+      document.getElementById('dashboardLiveBox').innerHTML = `
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="vod-card p-3 d-flex align-items-center justify-content-between" onclick="window.open('https://www.twitch.tv/${canalPrincipal}', '_blank')">
+            <div class="d-flex align-items-center gap-3">
+              <img src="${avatarPrincipal}" class="streamer-avatar" style="width:52px; height:52px;">
+              <div>
+                <div class="d-flex align-items-center gap-2">
+                  <span class="fw-bold fs-6">${canalPrincipal}</span>
+                  <span class="badge bg-danger rounded-pill" style="font-size:0.65rem;">ALWAYS ON 24/7</span>
+                </div>
+                <div class="text-secondary small mt-1">Vigilancia automática cada 2 min • 1080p60</div>
+              </div>
+            </div>
+            <i class="fa-solid fa-satellite-dish text-success fs-4"></i>
+          </div>
+        </div>
+      `;
+
+      // Renderizar Lista de Canales Monitoreados
+      document.getElementById('listaCanalesMonitoreados').innerHTML = (streamersUnicos.length ? streamersUnicos : ['tei']).map(st => {
+        const cant = videosGlobal.filter(x => x.streamer === st).length;
+        return `
+          <div class="col-12 col-md-6 col-lg-4">
+            <div class="p-3 rounded-3 border border-secondary border-opacity-25 d-flex justify-content-between align-items-center" style="background:var(--bg-input);">
+              <div>
+                <span class="fw-bold"><i class="fa-brands fa-twitch text-primary me-2"></i>${st}</span>
+                <div class="small text-secondary">${cant} grabaciones en Google Drive</div>
+              </div>
+              <span class="badge bg-success">Activo</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      renderizarSeccionRecordings();
+    }
+
+    // Crear HTML de una tarjeta de video (estilo Dashboard - StreamRecorder.pdf)
+    function crearTarjetaHTML(v, idx, mostrarDescarga) {
+      const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
+      return `
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+          <div class="vod-card" onclick="abrirModalVideo(${idx})">
+            <div class="vod-thumb">
+              <img src="${v.miniatura || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80'}" alt="${v.titulo}">
+              <span class="badge-twitch"><i class="fa-brands fa-twitch me-1"></i>Twitch</span>
+              <span class="badge-duration">${v.duracion || '01:00:00'}</span>
+            </div>
+            <div class="vod-info">
+              <div class="d-flex gap-2 align-items-start">
+                <img class="streamer-avatar" src="${v.avatar || 'https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png'}" alt="${v.streamer}">
+                <div class="flex-grow-1 overflow-hidden">
+                  <div class="vod-title" title="${v.titulo}">${v.titulo}</div>
+                  <div class="d-flex justify-content-between align-items-center mt-1">
+                    <span class="text-secondary" style="font-size:0.76rem;">
+                      <strong class="text-light">${v.streamer}</strong> • ${v.fecha}
+                    </span>
+                    ${mostrarDescarga ? `<a href="${linkDrive}" target="_blank" onclick="event.stopPropagation()" class="text-light" title="Descargar MP4"><i class="fa-solid fa-download"></i></a>` : ''}
+                  </div>
+                  <div class="d-flex gap-1 flex-wrap mt-2">
+                    <span class="badge-cat">${v.categoria || 'Just Chatting'}</span>
+                    <span class="badge-res">${v.calidad || '1080p60'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Renderizar la pestaña RECORDINGS (Vista Lista con Acordeones por Streamer o Vista Grid)
+    function renderizarSeccionRecordings() {
+      const q = (document.getElementById('recSearchInput')?.value || '').toLowerCase();
+      const sortBy = document.getElementById('recSortBy')?.value || 'recent';
+      const recOrder = document.getElementById('recOrder')?.value || 'newest';
+      const showDl = document.getElementById('chkDownloadBtns')?.checked ?? true;
+
+      let filtrados = videosGlobal.filter(v =>
+        v.streamer.toLowerCase().includes(q) ||
+        v.titulo.toLowerCase().includes(q) ||
+        v.fecha.toLowerCase().includes(q) ||
+        (v.categoria && v.categoria.toLowerCase().includes(q))
+      );
+
+      if (recOrder === 'oldest') filtrados.reverse();
+      document.getElementById('textoContadorRec').innerText = `${filtrados.length} grabaciones disponibles`;
+
+      const cont = document.getElementById('contenedorRecordingsVista');
+      if (filtrados.length === 0) {
+        cont.innerHTML = `<div class="text-center text-secondary py-5">No se encontraron grabaciones con ese criterio.</div>`;
+        return;
+      }
+
+      if (vistaRecActual === 'grid') {
+        cont.innerHTML = `<div class="row g-4">${filtrados.map(v => crearTarjetaHTML(v, videosGlobal.indexOf(v), showDl)).join('')}</div>`;
+      } else {
+        // Agrupar por Streamer (Idéntico a Recordings - StreamRecorder.pdf)
+        const grupos = {};
+        filtrados.forEach(v => {
+          if (!grupos[v.streamer]) grupos[v.streamer] = [];
+          grupos[v.streamer].push(v);
+        });
+
+        let nombresStreamers = Object.keys(grupos);
+        if (sortBy === 'name') nombresStreamers.sort();
+        if (sortBy === 'count') nombresStreamers.sort((a, b) => grupos[b].length - grupos[a].length);
+
+        cont.innerHTML = nombresStreamers.map((streamer, sIdx) => {
+          const vods = grupos[streamer];
+          const avatar = vods[0]?.avatar || 'https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png';
+          return `
+            <div class="streamer-accordion">
+              <div class="streamer-row" onclick="toggleAcordeon('drawer-${sIdx}')">
+                <div class="d-flex align-items-center gap-3">
+                  <i class="fa-brands fa-twitch fs-5" style="color:#9146ff"></i>
+                  <img src="${avatar}" class="streamer-avatar">
+                  <span class="fw-bold fs-6">${streamer}</span>
+                  <span class="badge rounded-pill bg-primary px-2">${vods.length}</span>
+                  <span class="badge rounded-pill bg-warning text-dark"><i class="fa-solid fa-hard-drive me-1"></i>Drive 1TB</span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                  <a href="https://www.twitch.tv/${streamer}" target="_blank" onclick="event.stopPropagation()" class="btn btn-sm btn-dark border-secondary border-opacity-25">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                  </a>
+                  <button class="btn btn-sm btn-dark border-secondary border-opacity-25">
+                    <i class="fa-solid fa-chevron-down"></i>
+                  </button>
+                </div>
+              </div>
+              <div id="drawer-${sIdx}" class="streamer-drawer ${sIdx === 0 ? 'abierto' : ''}">
+                <div class="row g-4">
+                  ${vods.map(v => crearTarjetaHTML(v, videosGlobal.indexOf(v), showDl)).join('')}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function toggleAcordeon(id) {
+      document.getElementById(id).classList.toggle('abierto');
+    }
+
+    function cambiarModoVistaRec(modo) {
+      vistaRecActual = modo;
+      document.getElementById('btnViewGrid').className = modo === 'grid' ? 'btn btn-sm btn-purple px-3' : 'btn btn-sm btn-outline-secondary px-3';
+      document.getElementById('btnViewList').className = modo === 'list' ? 'btn btn-sm btn-purple px-3' : 'btn btn-sm btn-outline-secondary px-3';
+      renderizarSeccionRecordings();
+    }
+
+    // Navegación entre Vistas y Pestañas
+    function cambiarVista(idVista) {
+      document.querySelectorAll('.vista-seccion').forEach(el => el.classList.remove('activa'));
+      document.getElementById(idVista).classList.add('activa');
+      window.scrollTo(0, 0);
+    }
+
+    function mostrarTab(idTab) {
+      document.querySelectorAll('.sub-tab').forEach(el => el.style.display = 'none');
+      document.getElementById(idTab).style.display = 'block';
+      document.querySelectorAll('.nav-item-side').forEach(el => el.classList.remove('active'));
+      if (idTab === 'tab-dashboard') document.getElementById('menu-dashboard').classList.add('active');
+      if (idTab === 'tab-recordings') document.getElementById('menu-recordings').classList.add('active');
+      if (idTab === 'tab-monitored') document.getElementById('menu-monitored').classList.add('active');
+    }
+
+    function sincronizarBusqueda(val) {
+      document.getElementById('recSearchInput').value = val;
+      renderizarSeccionRecordings();
+    }
+
+    function filtrarTodo(val) {
+      mostrarTab('tab-recordings');
+      document.getElementById('recSearchInput').value = val;
+      renderizarSeccionRecordings();
+    }
+
+    // Funciones de Login y Registro
+    function modoAuth(modo) {
+      modoAuthActual = modo;
+      const esReg = modo === 'register';
+      document.getElementById('authTitulo').innerText = esReg ? 'Sign up to Streamrecorder' : 'Sign in to Streamrecorder';
+      document.getElementById('authSubtitulo').innerText = esReg
+        ? 'Crea una cuenta gratuita y disfruta de acceso completo a todas las grabaciones sin silencios por copyright.'
+        : '¡Bienvenido de nuevo! Inicia sesión en tu cuenta para acceder al panel completo de grabaciones.';
+      document.getElementById('campoEmailRegistro').style.display = esReg ? 'block' : 'none';
+      document.getElementById('btnSubmitAuth').innerText = esReg ? 'Create Account' : 'Login';
+      document.getElementById('btnToggleAuth').innerText = esReg ? 'Login' : 'Create New Account';
+    }
+
+    function alternarModoAuth() {
+      modoAuth(modoAuthActual === 'login' ? 'register' : 'login');
+    }
+
+    function togglePassword() {
+      const inp = document.getElementById('authPass');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    function procesarLogin(e) {
+      e.preventDefault();
+      const user = document.getElementById('authUser').value.trim() || 'Usuario';
+      entrarDirecto(user);
+    }
+
+    function entrarDirecto(nombre) {
+      localStorage.setItem('sr_user', nombre);
+      document.getElementById('userNameDisplay').innerText = nombre;
+      document.getElementById('userInitial').innerText = nombre.charAt(0).toUpperCase();
+      cambiarVista('vista-app');
+      mostrarTab('tab-dashboard');
+    }
+
+    // Abrir Modal Reproductor
+    function abrirModalVideo(idx) {
+      const v = videosGlobal[idx];
+      if (!v) return;
+      document.getElementById('modalTitulo').innerText = v.titulo;
+      document.getElementById('modalMeta').innerText = `Streamer: ${v.streamer} • Fecha: ${v.fecha} • Calidad: ${v.calidad || '1080p60'}`;
+      const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
+      document.getElementById('modalBotonDrive').href = linkDrive;
+
+      const iframeCont = document.getElementById('contenedorIframe');
+      if (v.drive_id) {
+        iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+      } else {
+        iframeCont.innerHTML = `
+          <div class="d-flex flex-column justify-content-center align-items-center text-center p-4">
+            <i class="fa-brands fa-google-drive fa-3x text-primary mb-3"></i>
+            <h5>Archivo listo en Google Drive</h5>
+            <p class="text-secondary small">Haz clic en el botón inferior para ver o descargar la grabación en máxima calidad.</p>
+          </div>`;
+      }
+      new bootstrap.Modal(document.getElementById('reproductorModal')).show();
+    }
+
+    document.getElementById('reproductorModal').addEventListener('hidden.bs.modal', () => {
+      document.getElementById('contenedorIframe').innerHTML = '';
+    });
+
+    inicializarApp();
+  </script>
+</body>
+</html>
