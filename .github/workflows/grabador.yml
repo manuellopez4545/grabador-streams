@@ -1,30 +1,64 @@
-name: Grabador de Twitch a Drive
+name: Grabador de Twitch a Drive v2.0
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # Revisa automáticamente cada 15 minutos
-  workflow_dispatch: # Botón manual para iniciarlo cuando quieras
+    - cron: '*/10 * * * *' # Intenta revisar cada 10 minutos
+  workflow_dispatch:
+    inputs:
+      canal_manual:
+        description: 'Nombre del canal a grabar (déjalo vacío para usar el predeterminado)'
+        required: false
+        default: ''
 
 concurrency:
-  group: grabando-twitch
+  group: grabando-twitch-${{ github.event.inputs.canal_manual || 'default' }}
   cancel-in-progress: false
 
 env:
-  STREAMER: "illojuan" # <-- NOMBRE EXACTO DEL CANAL DE TWITCH
+  STREAMER_DEFAULT: "manuel0pez_" # <-- TU CANAL PREDETERMINADO
+  TZ: "America/Bogota"    # <-- HORA LOCAL EXACTA (UTC-5)
 
 jobs:
   grabar:
     runs-on: ubuntu-latest
-    timeout-minutes: 350 # Casi 6 horas por turno
+    timeout-minutes: 350
 
     steps:
-      - name: 1. Instalar herramientas
+      - name: 1. Chequeo ultrarrápido (¿Está en vivo?)
+        id: check
+        run: |
+          CANAL="${{ github.event.inputs.canal_manual }}"
+          if [ -z "$CANAL" ]; then CANAL="$STREAMER_DEFAULT"; fi
+          echo "CANAL=$CANAL" >> $GITHUB_ENV
+
+          # Consulta directa a la página de Twitch sin instalar nada (tarda 2 segundos)
+          ESTADO=$(curl -s -m 10 "https://www.twitch.tv/$CANAL" | grep -o '"isLiveBroadcast":true' || true)
+          
+          # Verificación rápida con el API GraphQL público de Twitch por seguridad
+          GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
+            -X POST https://gql.twitch.tv/gql \
+            -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
+
+          if [ -n "$ESTADO" ] || [ -n "$GQL" ]; then
+            echo "¡$CANAL está EN VIVO! Preparando grabación..."
+            echo "en_vivo=si" >> $GITHUB_OUTPUT
+          else
+            echo "$CANAL NO está en vivo. Apagando en 2 segundos para ahorrar recursos..."
+            echo "en_vivo=no" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 2. Instalar herramientas y Bloqueador de Anuncios
+        if: steps.check.outputs.en_vivo == 'si'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3-pip
           pip3 install streamlink
+          # Instalar plugin para saltar anuncios de Twitch
+          mkdir -p ~/.local/share/streamlink/plugins
+          curl -L -s https://raw.githubusercontent.com/2bc4/streamlink-ttvlol/master/twitch.py -o ~/.local/share/streamlink/plugins/twitch.py
 
-      - name: 2. Conectar con tu Google Drive
+      - name: 3. Conectar con Google Drive
+        if: steps.check.outputs.en_vivo == 'si'
         env:
           TOKEN: ${{ secrets.RCLONE_TOKEN }}
         run: |
@@ -34,60 +68,73 @@ jobs:
           echo "scope = drive" >> ~/.config/rclone/rclone.conf
           echo "token = $TOKEN" >> ~/.config/rclone/rclone.conf
 
-      - name: 3. Grabar el directo
+      - name: 4. Grabar directo (Con reconexión y carpetas por fecha)
+        if: steps.check.outputs.en_vivo == 'si'
         run: |
-          # Verificar si está en vivo
-          if ! streamlink https://www.twitch.tv/$STREAMER best --stream-url > /dev/null 2>&1; then
-            echo "El canal no está en vivo en este momento."
-            exit 0
-          fi
-
-          echo "¡En vivo! Grabando..."
           mkdir -p grabaciones
-          FECHA=$(date +"%Y-%m-%d_%H-%M")
+          FECHA_CARPETA=$(date +"%Y-%m-%d")
+          echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
 
-          # Subidor en segundo plano (va subiendo bloques de 1 hora por si el stream es muy largo)
+          # Vigilante en segundo plano que convierte y sube cada bloque de 1 hora
           (
             while true; do
               sleep 30
               for archivo in $(find grabaciones/ -name "*.ts" -mmin +1); do
                 nombre_mp4="${archivo%.ts}.mp4"
                 ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
-                rclone move "$nombre_mp4" mi_drive:StreamsTwitch/$STREAMER/
+                rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
               done
             done
           ) &
-          
-          # Graba hasta por 5 horas en formato .ts (resistente a cortes manuales)
-          timeout 18000s bash -c "streamlink https://www.twitch.tv/$STREAMER best -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${STREAMER}_${FECHA}_Parte_%02d.ts" || true
 
-      - name: 4. Subir video a Drive al terminar o cancelar el workflow
-        if: always() # <-- ESTO HACE LA MAGIA: Se ejecuta aunque tú detengas el workflow manualmente
+          # Bucle de grabación con tolerancia a micro-cortes (espera 45s si se cae el stream)
+          TIEMPO_INICIO=$(date +%s)
+          while [ $(( $(date +%s) - TIEMPO_INICIO )) -lt 18000 ]; do
+            HORA_ACTUAL=$(date +"%H-%M-%S")
+            
+            timeout $(( 18000 - ($(date +%s) - TIEMPO_INICIO) ))s bash -c "streamlink https://www.twitch.tv/$CANAL best \
+              --twitch-proxy-playlist=https://eu.luminous.dev,https://as.luminous.dev \
+              --twitch-disable-ads \
+              --retry-streams 10 \
+              --retry-max 5 \
+              --stream-segment-threads 3 \
+              -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_ACTUAL}_Parte_%02d.ts" || true
+
+            echo "Verificando si fue un micro-corte o si el stream terminó..."
+            sleep 30
+            GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" -X POST https://gql.twitch.tv/gql -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
+            if [ -z "$GQL" ]; then
+              echo "El directo terminó definitivamente."
+              break
+            fi
+            echo "¡Fue solo un micro-corte! Reconectando grabación..."
+          done
+
+      - name: 5. Subir videos restantes al finalizar o cancelar
+        if: always() && steps.check.outputs.en_vivo == 'si'
         run: |
-          echo "Cerrando grabación y subiendo archivos restantes a Google Drive..."
+          echo "Procesando y subiendo el último tramo del video..."
           if [ -d "grabaciones" ]; then
-            # Convertir cualquier pedazo .ts restante a .mp4 para que se pueda ver bien en Drive
             for archivo in grabaciones/*.ts; do
               [ -e "$archivo" ] || continue
               nombre_mp4="${archivo%.ts}.mp4"
               ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
             done
-            
-            # Subir todo a tu Google Drive
-            rclone move grabaciones/ mi_drive:StreamsTwitch/$STREAMER/
-            echo "¡Subida completada con éxito!"
+            rclone move grabaciones/ "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
+            echo "¡Todo guardado en Google Drive en la carpeta $CANAL/$FECHA_CARPETA!"
           fi
 
-      - name: 5. Relevo automático (Solo si terminó por tiempo de 5h y no porque tú lo cancelaste)
-        if: success()
+      - name: 6. Relevo automático para streams de +5 horas
+        if: success() && steps.check.outputs.en_vivo == 'si'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          if streamlink https://www.twitch.tv/$STREAMER best --stream-url > /dev/null 2>&1; then
-            echo "El directo sigue en vivo tras 5 horas. Iniciando relevo..."
+          GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" -X POST https://gql.twitch.tv/gql -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
+          if [ -n "$GQL" ]; then
+            echo "El directo sigue activo tras 5 horas. Llamando al relevo..."
             curl -X POST -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $GH_TOKEN" \
               https://api.github.com/repos/$REPO/actions/workflows/grabador.yml/dispatches \
-              -d '{"ref":"main"}'
+              -d "{\"ref\":\"main\",\"inputs\":{\"canal_manual\":\"$CANAL\"}}"
           fi
