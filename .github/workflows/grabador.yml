@@ -1,22 +1,16 @@
-name: Grabador de Twitch a Drive v2.1
+name: Grabador de Twitch a Drive v2.2
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
-  workflow_dispatch:
+   workflow_dispatch:
     inputs:
       canal_manual:
         description: 'Nombre del canal a grabar (déjalo vacío para usar el predeterminado)'
         required: false
         default: ''
 
-concurrency:
-  group: grabando-twitch-${{ github.event.inputs.canal_manual || 'default' }}
-  cancel-in-progress: false
-
 env:
-  STREAMER_DEFAULT: "manuel0pez_" # <-- TU CANAL PREDETERMINADO
-  TZ: "America/Bogota"    # <-- HORA DE COLOMBIA
+  STREAMER_DEFAULT: "manuel0pez_" # <-- PON AQUÍ TU CANAL O EL DEL STREAMER
+  TZ: "America/Bogota"
 
 jobs:
   grabar:
@@ -24,12 +18,27 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: 1. Chequeo ultrarrápido (¿Está en vivo?)
+      - name: 1. Chequeo ultrarrápido (¿Ya hay uno grabando o está en vivo?)
         id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
+          # 1. Revisar si ya hay otro proceso grabando en este momento
+          ACTIVOS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs?status=in_progress" \
+            | grep -o '"id": [0-9]*' | grep -v "$RUN_ID" | wc -l)
+
+          if [ "$ACTIVOS" -gt 0 ]; then
+            echo "Ya hay un proceso grabando el directo en este momento. Cerrando este aviso en 1 segundo..."
+            echo "en_vivo=no" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 2. Si no hay ninguno grabando, revisar si el canal está en vivo en Twitch
           CANAL="${{ github.event.inputs.canal_manual }}"
           if [ -z "$CANAL" ]; then CANAL="$STREAMER_DEFAULT"; fi
-          # Pasar a minúsculas por seguridad
           CANAL=$(echo "$CANAL" | tr '[:upper:]' '[:lower:]')
           echo "CANAL=$CANAL" >> $GITHUB_ENV
 
@@ -71,13 +80,11 @@ jobs:
           HORA_INICIO=$(date +"%H-%M-%S")
           echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
 
-          # Vigilante en segundo plano: SOLO sube partes anteriores cuando ya se creó la parte siguiente
           (
             while true; do
               sleep 30
               TOTAL_TS=$(ls -1 grabaciones/*.ts 2>/dev/null | wc -l)
               if [ "$TOTAL_TS" -gt 1 ]; then
-                # Toma todos los archivos .ts MENOS el más reciente (que se está grabando ahora)
                 for archivo in $(ls -1tr grabaciones/*.ts | head -n -1); do
                   nombre_mp4="${archivo%.ts}.mp4"
                   ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
@@ -88,7 +95,6 @@ jobs:
           ) &
           SUBIDOR_PID=$!
 
-          # Grabación directa y estable: si el streamer corta, en 15 segundos se cierra solo
           timeout 18000s bash -c "streamlink https://www.twitch.tv/$CANAL best \
             --twitch-disable-ads \
             --stream-segment-timeout 15 \
