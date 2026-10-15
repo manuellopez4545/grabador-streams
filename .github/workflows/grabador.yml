@@ -1,68 +1,121 @@
-name: Grabador de Twitch a Drive v2.2
+name: Grabador Multi-Streamer Supabase v4.0
 
 on:
-   workflow_dispatch:
+  workflow_dispatch:
     inputs:
       canal_manual:
-        description: 'Nombre del canal a grabar (déjalo vacío para usar el predeterminado)'
+        description: 'Opcional: Forzar un canal específico (déjalo vacío para leer todos los de Supabase)'
         required: false
         default: ''
 
 env:
-  STREAMER_DEFAULT: "illojuan" # <-- PON AQUÍ TU CANAL O EL DEL STREAMER
   TZ: "America/Bogota"
 
 jobs:
-  grabar:
+  # =========================================================================
+  # FASE 1: EL RADAR (Lee Supabase y detecta quiénes están en vivo en 3 seg)
+  # =========================================================================
+  radar:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
-
+    outputs:
+      canales_a_grabar: ${{ steps.detectar.outputs.lista }}
+      hay_canales: ${{ steps.detectar.outputs.hay }}
     steps:
-      - name: 1. Chequeo ultrarrápido (¿Ya hay uno grabando o está en vivo?)
-        id: check
+      - name: Consultar Supabase y verificar quién está en vivo en Twitch
+        id: detectar
         env:
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
+          MANUAL: ${{ github.event.inputs.canal_manual }}
         run: |
-          # 1. Revisar si ya hay otro proceso grabando en este momento
-          ACTIVOS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/$REPO/actions/runs?status=in_progress" \
-            | grep -o '"id": [0-9]*' | grep -v "$RUN_ID" | wc -l)
+          # 1. Obtener lista de canales desde Supabase (o el manual si se escribió uno)
+          if [ -n "$MANUAL" ]; then
+            STREAMERS=$(echo "$MANUAL" | tr '[:upper:]' '[:lower:]')
+          else
+            STREAMERS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?activo=eq.true&select=streamer" \
+              -H "apikey: $SB_KEY" \
+              -H "Authorization: Bearer $SB_KEY" | jq -r '.[].streamer' | tr '[:upper:]' '[:lower:]')
+          fi
 
-          if [ "$ACTIVOS" -gt 0 ]; then
-            echo "Ya hay un proceso grabando el directo en este momento. Cerrando este aviso en 1 segundo..."
-            echo "en_vivo=no" >> $GITHUB_OUTPUT
+          if [ -z "$STREAMERS" ]; then
+            echo "No hay streamers configurados en Supabase."
+            echo "hay=no" >> $GITHUB_OUTPUT
+            echo "lista=[]" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 2. Si no hay ninguno grabando, revisar si el canal está en vivo en Twitch
-          CANAL="${{ github.event.inputs.canal_manual }}"
-          if [ -z "$CANAL" ]; then CANAL="$STREAMER_DEFAULT"; fi
-          CANAL=$(echo "$CANAL" | tr '[:upper:]' '[:lower:]')
-          echo "CANAL=$CANAL" >> $GITHUB_ENV
+          # 2. Consultar a GitHub qué trabajos (jobs) están corriendo ahora mismo para no duplicar el mismo streamer
+          JOBS_ACTIVOS=""
+          RUNS_IDS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs?status=in_progress" | jq -r '.workflow_runs[].id')
+          
+          for r_id in $RUNS_IDS; do
+            if [ "$r_id" != "${{ github.run_id }}" ]; then
+              NOMBRES=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+                "https://api.github.com/repos/$REPO/actions/runs/$r_id/jobs" | jq -r '.jobs[] | select(.status=="in_progress") | .name')
+              JOBS_ACTIVOS="$JOBS_ACTIVOS $NOMBRES"
+            fi
+          done
 
-          GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
-            -X POST https://gql.twitch.tv/gql \
-            -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
+          # 3. Revisar cada streamer en Twitch
+          LISTA_JSON="[]"
+          for CANAL in $STREAMERS; do
+            # Verificar si ya hay una máquina grabando a este streamer específico
+            if echo "$JOBS_ACTIVOS" | grep -qi "grabar ($CANAL)"; then
+              echo "⏭️ $CANAL ya se está grabando en otra máquina activa. Saltando..."
+              continue
+            fi
 
-          if [ -n "$GQL" ]; then
-            echo "¡$CANAL está EN VIVO! Iniciando sistema..."
-            echo "en_vivo=si" >> $GITHUB_OUTPUT
+            # Consultar a Twitch si está en vivo
+            GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
+              -X POST https://gql.twitch.tv/gql \
+              -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
+
+            if [ -n "$GQL" ]; then
+              echo "✅ ¡$CANAL está EN VIVO y libre para grabar!"
+              LISTA_JSON=$(echo "$LISTA_JSON" | jq --arg c "$CANAL" '. + [$c]')
+            else
+              echo "💤 $CANAL no está en vivo."
+            fi
+          done
+
+          CANTIDAD=$(echo "$LISTA_JSON" | jq 'length')
+          if [ "$CANTIDAD" -gt 0 ]; then
+            echo "hay=si" >> $GITHUB_OUTPUT
+            echo "lista=$(echo "$LISTA_JSON" | jq -c .)" >> $GITHUB_OUTPUT
           else
-            echo "$CANAL NO está en vivo. Apagando en 2 segundos..."
-            echo "en_vivo=no" >> $GITHUB_OUTPUT
+            echo "hay=no" >> $GITHUB_OUTPUT
+            echo "lista=[]" >> $GITHUB_OUTPUT
           fi
 
+  # =========================================================================
+  # FASE 2: GRABACIÓN PARALELA (Abre 1 máquina por cada streamer en vivo)
+  # =========================================================================
+  grabar:
+    needs: radar
+    if: needs.radar.outputs.hay_canales == 'si'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        canal: ${{ fromJson(needs.radar.outputs.canales_a_grabar) }}
+
+    name: grabar (${{ matrix.canal }})
+
+    steps:
+      - name: 1. Descargar repositorio
+        uses: actions/checkout@v4
+
       - name: 2. Instalar herramientas
-        if: steps.check.outputs.en_vivo == 'si'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg rclone python3-pip
+          sudo apt-get install -y ffmpeg rclone python3-pip jq
           pip3 install --upgrade streamlink
 
       - name: 3. Conectar con Google Drive
-        if: steps.check.outputs.en_vivo == 'si'
         env:
           TOKEN: ${{ secrets.RCLONE_TOKEN }}
         run: |
@@ -72,63 +125,104 @@ jobs:
           echo "scope = drive" >> ~/.config/rclone/rclone.conf
           echo "token = $TOKEN" >> ~/.config/rclone/rclone.conf
 
-      - name: 4. Grabar directo (Cierre automático al apagar stream)
-        if: steps.check.outputs.en_vivo == 'si'
+      - name: 4. Obtener metadatos de Twitch y Grabar a ${{ matrix.canal }}
+        env:
+          CANAL: ${{ matrix.canal }}
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          mkdir -p grabaciones
+          mkdir -p grabaciones thumbs
           FECHA_CARPETA=$(date +"%Y-%m-%d")
           HORA_INICIO=$(date +"%H-%M-%S")
           echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
 
-          (
-            while true; do
-              sleep 30
-              TOTAL_TS=$(ls -1 grabaciones/*.ts 2>/dev/null | wc -l)
-              if [ "$TOTAL_TS" -gt 1 ]; then
-                for archivo in $(ls -1tr grabaciones/*.ts | head -n -1); do
-                  nombre_mp4="${archivo%.ts}.mp4"
-                  ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
-                  rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
-                done
-              fi
-            done
-          ) &
-          SUBIDOR_PID=$!
+          # Consultar Título, Categoría y Avatar real en Twitch
+          INFO_TWITCH=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
+            -X POST https://gql.twitch.tv/gql \
+            -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){profileImageURL(width:70) stream{title game{name}}}}\"}")
+          
+          TITULO=$(echo "$INFO_TWITCH" | jq -r '.data.user.stream.title // "Directo Sin Copyright"')
+          CATEGORIA=$(echo "$INFO_TWITCH" | jq -r '.data.user.stream.game.name // "Just Chatting"')
+          AVATAR=$(echo "$INFO_TWITCH" | jq -r '.data.user.profileImageURL // "https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png"')
 
+          echo "TITULO_STREAM=$TITULO" >> $GITHUB_ENV
+          echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
+          echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
+
+          # Actualizar el avatar real del streamer en la tabla streamers_monitoreados de Supabase
+          curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
+            -H "apikey: $SB_KEY" \
+            -H "Authorization: Bearer $SB_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"avatar\": \"$AVATAR\"}" || true
+
+          # Iniciar grabación (corta en bloques de 1 hora y se detiene 20s después de apagar OBS)
           timeout 18000s bash -c "streamlink https://www.twitch.tv/$CANAL best \
             --twitch-disable-ads \
             --stream-segment-timeout 15 \
             --stream-timeout 20 \
             -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}_Parte_%02d.ts" || true
 
-          kill $SUBIDOR_PID 2>/dev/null || true
-
-      - name: 5. Subir el video a Drive al terminar o cancelar
-        if: always() && steps.check.outputs.en_vivo == 'si'
+      - name: 5. Subir a Google Drive y Registrar en Base de Datos Supabase
+        if: always()
+        env:
+          CANAL: ${{ matrix.canal }}
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_KEY }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "Empaquetando y subiendo el video a Google Drive..."
           if [ -d "grabaciones" ]; then
             for archivo in grabaciones/*.ts; do
               [ -e "$archivo" ] || continue
               nombre_mp4="${archivo%.ts}.mp4"
-              ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
-            done
-            rclone move grabaciones/ "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
-            echo "¡Video subido con éxito!"
-          fi
+              NOMBRE_BASE=$(basename "$nombre_mp4")
+              NOMBRE_THUMB="thumbs/${NOMBRE_BASE%.mp4}.jpg"
 
-      - name: 6. Relevo automático para streams de +5 horas
-        if: success() && steps.check.outputs.en_vivo == 'si'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          sleep 10
-          GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" -X POST https://gql.twitch.tv/gql -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
-          if [ -n "$GQL" ]; then
-            echo "El directo sigue activo tras 5 horas. Llamando al relevo..."
-            curl -X POST -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              https://api.github.com/repos/$REPO/actions/workflows/grabador.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{\"canal_manual\":\"$CANAL\"}}"
+              # 1. Convertir a MP4 y extraer captura de pantalla real en el segundo 5
+              ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
+              ffmpeg -y -ss 00:00:05 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
+
+              # 2. Calcular duración exacta
+              DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
+
+              # 3. Subir MP4 a Google Drive y obtener su ID público
+              rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
+              LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "https://drive.google.com")
+              DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
+
+              # 4. Subir miniatura al repositorio para tener URL pública rápida
+              if [ -f "$NOMBRE_THUMB" ]; then
+                git pull origin main --rebase || true
+                git config user.name "StreamRecorder Bot"
+                git config user.email "bot@streamrecorder.local"
+                git add "$NOMBRE_THUMB"
+                git commit -m "Thumb $NOMBRE_BASE" || true
+                git push origin main || true
+                MINIATURA_URL="https://raw.githubusercontent.com/$REPO/main/$NOMBRE_THUMB"
+              else
+                MINIATURA_URL="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80"
+              fi
+
+              # 5. Insertar el nuevo VOD directamente en la tabla 'grabaciones' de Supabase
+              FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
+              BODY_JSON=$(jq -n \
+                --arg st "$CANAL" \
+                --arg av "$AVATAR_STREAM" \
+                --arg ti "$TITULO_STREAM" \
+                --arg ca "$CATEGORIA_STREAM" \
+                --arg fe "$FECHA_COMPLETA" \
+                --arg du "$DURACION" \
+                --arg th "$MINIATURA_URL" \
+                --arg di "$DRIVE_ID" \
+                --arg ul "$LINK_DRIVE" \
+                '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul}')
+
+              curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
+                -H "apikey: $SB_KEY" \
+                -H "Authorization: Bearer $SB_KEY" \
+                -H "Content-Type: application/json" \
+                -d "$BODY_JSON"
+              
+              echo "¡VOD de $CANAL registrado en Supabase y subido a Drive!"
+            done
           fi
