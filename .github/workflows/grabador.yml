@@ -1,20 +1,18 @@
-name: Grabador Multi-Streamer Supabase v4.0
+name: Grabador Multi-Streamer Cloud Infinito v5.0
 
 on:
   workflow_dispatch:
     inputs:
       canal_manual:
-        description: 'Opcional: Forzar un canal específico (déjalo vacío para leer todos los de Supabase)'
+        description: 'Opcional: Forzar un canal específico'
         required: false
         default: ''
 
 env:
   TZ: "America/Bogota"
+  DIAS_RETENCION_DRIVE: "14d" # <-- Borra de Drive los videos de hace +14 días para nunca llenar tu 1TB
 
 jobs:
-  # =========================================================================
-  # FASE 1: EL RADAR (Lee Supabase y detecta quiénes están en vivo en 3 seg)
-  # =========================================================================
   radar:
     runs-on: ubuntu-latest
     outputs:
@@ -30,7 +28,6 @@ jobs:
           REPO: ${{ github.repository }}
           MANUAL: ${{ github.event.inputs.canal_manual }}
         run: |
-          # 1. Obtener lista de canales desde Supabase (o el manual si se escribió uno)
           if [ -n "$MANUAL" ]; then
             STREAMERS=$(echo "$MANUAL" | tr '[:upper:]' '[:lower:]')
           else
@@ -40,13 +37,11 @@ jobs:
           fi
 
           if [ -z "$STREAMERS" ]; then
-            echo "No hay streamers configurados en Supabase."
             echo "hay=no" >> $GITHUB_OUTPUT
             echo "lista=[]" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 2. Consultar a GitHub qué trabajos (jobs) están corriendo ahora mismo para no duplicar el mismo streamer
           JOBS_ACTIVOS=""
           RUNS_IDS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/$REPO/actions/runs?status=in_progress" | jq -r '.workflow_runs[].id')
@@ -59,25 +54,20 @@ jobs:
             fi
           done
 
-          # 3. Revisar cada streamer en Twitch
           LISTA_JSON="[]"
           for CANAL in $STREAMERS; do
-            # Verificar si ya hay una máquina grabando a este streamer específico
             if echo "$JOBS_ACTIVOS" | grep -qi "grabar ($CANAL)"; then
-              echo "⏭️ $CANAL ya se está grabando en otra máquina activa. Saltando..."
+              echo "⏭️ $CANAL ya se está grabando. Saltando..."
               continue
             fi
 
-            # Consultar a Twitch si está en vivo
             GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
               -X POST https://gql.twitch.tv/gql \
               -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
 
             if [ -n "$GQL" ]; then
-              echo "✅ ¡$CANAL está EN VIVO y libre para grabar!"
+              echo "✅ ¡$CANAL está EN VIVO!"
               LISTA_JSON=$(echo "$LISTA_JSON" | jq --arg c "$CANAL" '. + [$c]')
-            else
-              echo "💤 $CANAL no está en vivo."
             fi
           done
 
@@ -90,9 +80,6 @@ jobs:
             echo "lista=[]" >> $GITHUB_OUTPUT
           fi
 
-  # =========================================================================
-  # FASE 2: GRABACIÓN PARALELA (Abre 1 máquina por cada streamer en vivo)
-  # =========================================================================
   grabar:
     needs: radar
     if: needs.radar.outputs.hay_canales == 'si'
@@ -115,15 +102,24 @@ jobs:
           sudo apt-get install -y ffmpeg rclone python3-pip jq
           pip3 install --upgrade streamlink
 
-      - name: 3. Conectar con Google Drive
+      - name: 3. Conectar con Google Drive + Internet Archive (Ilimitado)
         env:
           TOKEN: ${{ secrets.RCLONE_TOKEN }}
+          IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
+          IA_SECRET: ${{ secrets.IA_SECRET_KEY }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "[mi_drive]" > ~/.config/rclone/rclone.conf
-          echo "type = drive" >> ~/.config/rclone/rclone.conf
-          echo "scope = drive" >> ~/.config/rclone/rclone.conf
-          echo "token = $TOKEN" >> ~/.config/rclone/rclone.conf
+          cat <<EOF > ~/.config/rclone/rclone.conf
+          [mi_drive]
+          type = drive
+          scope = drive
+          token = $TOKEN
+
+          [archivo_infinito]
+          type = internetarchive
+          access_key_id = $IA_ACCESS
+          secret_access_key = $IA_SECRET
+          EOF
 
       - name: 4. Obtener metadatos de Twitch y Grabar a ${{ matrix.canal }}
         env:
@@ -136,7 +132,6 @@ jobs:
           HORA_INICIO=$(date +"%H-%M-%S")
           echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
 
-          # Consultar Título, Categoría y Avatar real en Twitch
           INFO_TWITCH=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
             -X POST https://gql.twitch.tv/gql \
             -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){profileImageURL(width:70) stream{title game{name}}}}\"}")
@@ -149,26 +144,25 @@ jobs:
           echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
           echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
 
-          # Actualizar el avatar real del streamer en la tabla streamers_monitoreados de Supabase
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"avatar\": \"$AVATAR\"}" || true
 
-          # Iniciar grabación (corta en bloques de 1 hora y se detiene 20s después de apagar OBS)
           timeout 18000s bash -c "streamlink https://www.twitch.tv/$CANAL best \
             --twitch-disable-ads \
             --stream-segment-timeout 15 \
             --stream-timeout 20 \
             -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}_Parte_%02d.ts" || true
 
-      - name: 5. Subir a Google Drive y Registrar en Base de Datos Supabase
+      - name: 5. Subir a Drive + Archivo Infinito y Limpiar espacio antiguo
         if: always()
         env:
           CANAL: ${{ matrix.canal }}
           SB_URL: ${{ secrets.SUPABASE_URL }}
           SB_KEY: ${{ secrets.SUPABASE_KEY }}
+          IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
           REPO: ${{ github.repository }}
         run: |
           if [ -d "grabaciones" ]; then
@@ -178,19 +172,27 @@ jobs:
               NOMBRE_BASE=$(basename "$nombre_mp4")
               NOMBRE_THUMB="thumbs/${NOMBRE_BASE%.mp4}.jpg"
 
-              # 1. Convertir a MP4 y extraer captura de pantalla real en el segundo 5
+              # 1. Convertir a MP4 y extraer miniatura
               ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
               ffmpeg -y -ss 00:00:05 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
 
-              # 2. Calcular duración exacta
               DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
 
-              # 3. Subir MP4 a Google Drive y obtener su ID público
+              # 2. Respaldo Permanente en Internet Archive (Si están configuradas las llaves)
+              URL_PERMANENTE=""
+              if [ -n "$IA_ACCESS" ]; then
+                BUCKET_IA="sr-vod-${CANAL}-${FECHA_CARPETA}"
+                echo "Subiendo copia perpetua a Internet Archive ($BUCKET_IA)..."
+                rclone copy "$nombre_mp4" "archivo_infinito:$BUCKET_IA/" --ignore-errors || true
+                URL_PERMANENTE="https://archive.org/download/$BUCKET_IA/$NOMBRE_BASE"
+              fi
+
+              # 3. Subir a Google Drive (Caché rápido de 14 días)
               rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
-              LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "https://drive.google.com")
+              LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "$URL_PERMANENTE")
               DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
 
-              # 4. Subir miniatura al repositorio para tener URL pública rápida
+              # 4. Guardar miniatura en el repositorio
               if [ -f "$NOMBRE_THUMB" ]; then
                 git pull origin main --rebase || true
                 git config user.name "StreamRecorder Bot"
@@ -203,7 +205,7 @@ jobs:
                 MINIATURA_URL="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80"
               fi
 
-              # 5. Insertar el nuevo VOD directamente en la tabla 'grabaciones' de Supabase
+              # 5. Registrar ambos enlaces (Drive rápido + Archive permanente) en Supabase
               FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
               BODY_JSON=$(jq -n \
                 --arg st "$CANAL" \
@@ -215,14 +217,19 @@ jobs:
                 --arg th "$MINIATURA_URL" \
                 --arg di "$DRIVE_ID" \
                 --arg ul "$LINK_DRIVE" \
-                '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul}')
+                --arg up "$URL_PERMANENTE" \
+                '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up}')
 
               curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
                 -H "apikey: $SB_KEY" \
                 -H "Authorization: Bearer $SB_KEY" \
                 -H "Content-Type: application/json" \
                 -d "$BODY_JSON"
-              
-              echo "¡VOD de $CANAL registrado en Supabase y subido a Drive!"
             done
+
+            # 6. AUTO-LIMPIEZA INTELIGENTE DE GOOGLE DRIVE:
+            # Borra de Drive los archivos con más de 14 días y vacía la papelera para liberar tu 1 TB
+            echo "Limpiando grabaciones de más de $DIAS_RETENCION_DRIVE en Google Drive..."
+            rclone delete "mi_drive:StreamsTwitch/" --min-age "$DIAS_RETENCION_DRIVE" --rmdirs || true
+            rclone cleanup "mi_drive:" || true
           fi
