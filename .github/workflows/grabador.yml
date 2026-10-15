@@ -10,7 +10,7 @@ on:
 
 env:
   TZ: "America/Bogota"
-  DIAS_RETENCION_DRIVE: "14d" # <-- Borra de Drive los videos de hace +14 días para nunca llenar tu 1TB
+  DIAS_RETENCION_DRIVE: "3" # <-- Borra de Drive los videos de hace +14 días para nunca llenar tu 1TB
 
 jobs:
   radar:
