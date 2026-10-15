@@ -1,4 +1,4 @@
-name: Grabador Multi-Streamer Cloud Infinito v5.0
+name: Grabador Multi-Streamer Cloud Infinito v5.2
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ on:
 
 env:
   TZ: "America/Bogota"
-  DIAS_RETENCION_DRIVE: "3" # <-- Borra de Drive los videos de hace +14 días para nunca llenar tu 1TB
 
 jobs:
   radar:
@@ -150,7 +149,6 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"avatar\": \"$AVATAR\"}" || true
 
-          # Vigilante en segundo plano: si el stream es muy largo, sube cada parte de 1h apenas se completa
           (
             while true; do
               sleep 45
@@ -174,7 +172,7 @@ jobs:
 
           kill $SUBIDOR_PID 2>/dev/null || true
 
-      - name: 5. Subir a Drive + Archivo Infinito (SIN borrar nada de tu Drive)
+      - name: 5. Subir a Drive + Archivo Infinito (100% Seguro sin auto-borrado)
         if: always()
         env:
           CANAL: ${{ matrix.canal }}
@@ -184,24 +182,20 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           if [ -d "grabaciones" ]; then
-            # Convertir cualquier parte final .ts que haya quedado al terminar o cancelar
             for archivo in grabaciones/*.ts; do
               [ -e "$archivo" ] || continue
               nombre_mp4="${archivo%.ts}.mp4"
               ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
             done
 
-            # Procesar todos los .mp4 generados
             for nombre_mp4 in grabaciones/*.mp4; do
               [ -e "$nombre_mp4" ] || continue
               NOMBRE_BASE=$(basename "$nombre_mp4")
               NOMBRE_THUMB="thumbs/${NOMBRE_BASE%.mp4}.jpg"
 
-              # 1. Extraer miniatura y duración
               ffmpeg -y -ss 00:00:05 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
               DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
 
-              # 2. Subir copia perpetua a Internet Archive
               URL_PERMANENTE=""
               if [ -n "$IA_ACCESS" ]; then
                 BUCKET_IA="sr-vod-${CANAL}-${FECHA_CARPETA}"
@@ -210,12 +204,11 @@ jobs:
                 URL_PERMANENTE="https://archive.org/download/$BUCKET_IA/$NOMBRE_BASE"
               fi
 
-              # 3. Subir a Google Drive (Modo seguro: nunca borra carpetas anteriores)
+              echo "Subiendo archivo MP4 a Google Drive..."
               rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
               LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "$URL_PERMANENTE")
               DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
 
-              # 4. Guardar miniatura en GitHub
               if [ -f "$NOMBRE_THUMB" ]; then
                 git pull origin main --rebase || true
                 git config user.name "StreamRecorder Bot"
@@ -228,12 +221,11 @@ jobs:
                 MINIATURA_URL="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80"
               fi
 
-              # 5. Registrar en Supabase
               FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
               BODY_JSON=$(jq -n \
                 --arg st "$CANAL" \
                 --arg av "$AVATAR_STREAM" \
-                --arg ti "$TITULO_STREAM ($NOMBRE_BASE)" \
+                --arg ti "$TITULO_STREAM" \
                 --arg ca "$CATEGORIA_STREAM" \
                 --arg fe "$FECHA_COMPLETA" \
                 --arg du "$DURACION" \
@@ -248,12 +240,7 @@ jobs:
                 -H "Authorization: Bearer $SB_KEY" \
                 -H "Content-Type: application/json" \
                 -d "$BODY_JSON"
+              
+              echo "¡Video guardado en Drive y publicado en la web con éxito!"
             done
-          fi
-
-            # 6. AUTO-LIMPIEZA INTELIGENTE DE GOOGLE DRIVE:
-            # Borra de Drive los archivos con más de 14 días y vacía la papelera para liberar tu 1 TB
-            echo "Limpiando grabaciones de más de $DIAS_RETENCION_DRIVE en Google Drive..."
-            rclone delete "mi_drive:StreamsTwitch/" --min-age "$DIAS_RETENCION_DRIVE" --rmdirs || true
-            rclone cleanup "mi_drive:" || true
           fi
