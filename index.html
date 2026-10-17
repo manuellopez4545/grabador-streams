@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StreamRecorder - Live Stream Recorder & VOD Archive</title>
+  <title>StreamRecorder - Private Cloud DVR (OAuth 2.0 / OIDC)</title>
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-  <!-- Librería Oficial de Supabase -->
+  <!-- SDK Oficial Supabase (Soporte OAuth 2.0 + OIDC PKCE) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
@@ -28,20 +28,22 @@
     .btn-purple:hover { opacity: 0.92; transform: translateY(-1px); color: #fff; }
     .btn-outline-purple { background: transparent; border: 1.5px solid var(--accent); color: #fff; border-radius: 50px; padding: 0.55rem 1.4rem; font-weight: 500; transition: all 0.2s; }
     .btn-outline-purple:hover { background: rgba(108, 92, 231, 0.15); color: #fff; }
-    .navbar-landing { background: rgba(11, 12, 20, 0.88); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color); padding: 0.9rem 0; }
-    .brand-logo { font-weight: 700; font-size: 1.35rem; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; }
-    .brand-icon { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #6c5ce7, #a29bfe); display: inline-flex; align-items: center; justify-content: center; color: #fff; }
-    .hero-landing { padding: 4.5rem 0 3rem; text-align: center; background: radial-gradient(circle at 50% 0%, rgba(108, 92, 231, 0.22) 0%, transparent 60%); }
-    .search-pill { max-width: 600px; margin: 2rem auto 0; background: var(--bg-card); border: 1px solid rgba(162, 155, 254, 0.35); border-radius: 50px; padding: 0.4rem 0.5rem 0.4rem 1.3rem; display: flex; align-items: center; }
-    .search-pill input { background: transparent; border: none; color: #fff; width: 100%; outline: none; font-size: 0.92rem; }
+
+    /* LOGIN & REGISTRO OBLIGATORIO */
     .auth-wrapper { display: flex; min-height: 100vh; }
     .auth-left { flex: 1; max-width: 580px; padding: 2.5rem 3.5rem; display: flex; flex-direction: column; justify-content: space-between; background: var(--bg-dark); }
     .auth-right { flex: 1; background: linear-gradient(135deg, rgba(11, 12, 20, 0.7), rgba(108, 92, 231, 0.25)), url('https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1400&q=80') center/cover; display: none; }
     @media (min-width: 992px) { .auth-right { display: block; } }
+    .brand-logo { font-weight: 700; font-size: 1.35rem; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; }
+    .brand-icon { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #6c5ce7, #a29bfe); display: inline-flex; align-items: center; justify-content: center; color: #fff; }
     .auth-input { background: var(--bg-input); border: 1px solid var(--border-color); color: #fff; border-radius: 50px; padding: 0.75rem 1.3rem; width: 100%; font-size: 0.9rem; outline: none; }
     .auth-input:focus { border-color: var(--accent); }
+    .oauth-btn { background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; border-radius: 50px; padding: 0.65rem; width: 100%; font-size: 0.88rem; display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.2s; font-weight: 500; }
+    .oauth-btn:hover { background: var(--bg-card-hover); border-color: var(--accent); }
+
+    /* PANEL PRIVADO DEL USUARIO */
     .app-header { height: 66px; background: var(--bg-sidebar); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; position: sticky; top: 0; z-index: 100; }
-    .header-search { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 50px; padding: 0.38rem 1rem; width: 380px; display: flex; align-items: center; gap: 10px; }
+    .header-search { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 50px; padding: 0.38rem 1rem; width: 400px; display: flex; align-items: center; gap: 10px; }
     .header-search input { background: transparent; border: none; color: #fff; width: 100%; outline: none; font-size: 0.85rem; }
     .app-body { display: flex; min-height: calc(100vh - 66px); }
     .app-sidebar { width: 240px; background: var(--bg-sidebar); border-right: 1px solid var(--border-color); padding: 1.5rem 0.8rem; flex-shrink: 0; }
@@ -73,66 +75,42 @@
 </head>
 <body>
 
-  <!-- VISTA 1: LANDING PUBLICA -->
-  <div id="vista-landing" class="vista-seccion activa">
-    <nav class="navbar-landing sticky-top">
-      <div class="container d-flex justify-content-between align-items-center">
-        <a class="brand-logo" href="#" onclick="cambiarVista('vista-landing')">
-          <span class="brand-icon"><i class="fa-solid fa-play"></i></span>
-          <span>stream<span style="color:var(--accent-light)">recorder</span></span>
-        </a>
-        <div class="d-flex align-items-center gap-3">
-          <a href="#" class="text-light text-decoration-none small d-none d-md-inline" onclick="cambiarVista('vista-app'); mostrarTab('tab-dashboard')">Dashboard</a>
-          <a href="#" class="text-light text-decoration-none small d-none d-md-inline" onclick="cambiarVista('vista-app'); mostrarTab('tab-recordings')">Recordings</a>
-          <button class="btn-outline-purple btn-sm px-3" id="btnNavLogin" onclick="cambiarVista('vista-auth'); modoAuth('login')">Sign In</button>
-          <button class="btn-purple btn-sm px-3" onclick="cambiarVista('vista-app')">Abrir Panel</button>
-        </div>
-      </div>
-    </nav>
-
-    <section class="hero-landing container">
-      <h1 class="display-5 fw-bold">Live Stream Recorder<br><span style="color:var(--accent-light)">and VOD Archive</span></h1>
-      <p class="text-secondary mt-2">Monitoreo automático 24/7 en la nube con audio original intacto sin silencios por copyright.</p>
-      <div class="search-pill">
-        <i class="fa-brands fa-twitch text-primary me-2"></i>
-        <input type="text" id="landingInputStreamer" placeholder="Escribe el nombre de un canal de Twitch para buscar o monitorear...">
-        <button class="btn-purple btn-sm" onclick="buscarOMonitorearDesdeLanding()">Ir</button>
-      </div>
-    </section>
-
-    <section class="container mb-5">
-      <div class="row g-3 text-center">
-        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)" id="landTotalVods">0</div><div class="small text-secondary">VODs Archivados</div></div></div>
-        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)" id="landTotalStreamers">0</div><div class="small text-secondary">Streamers Monitoreados</div></div></div>
-        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)">1080p60</div><div class="small text-secondary">Calidad Original</div></div></div>
-        <div class="col-6 col-md-3"><div class="kpi-card"><div class="kpi-value" style="color:var(--accent-light)">24/7</div><div class="small text-secondary">Vigilancia Activa</div></div></div>
-      </div>
-    </section>
-
-    <section class="container pb-5">
-      <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="fw-bold m-0">Latest Recordings</h4>
-        <button class="btn-outline-purple btn-sm" onclick="cambiarVista('vista-app'); mostrarTab('tab-recordings')">Ver Todos <i class="fa-solid fa-arrow-right ms-1"></i></button>
-      </div>
-      <div class="row g-4" id="landingGridVideos"></div>
-    </section>
-  </div>
-
-  <!-- VISTA 2: LOGIN Y REGISTRO REAL CON SUPABASE -->
-  <div id="vista-auth" class="vista-seccion">
+  <!-- =====================================================================
+       PANTALLA 1: LOGIN Y REGISTRO OBLIGATORIO (OAUTH 2.0 + OIDC)
+  ====================================================================== -->
+  <div id="vista-auth" class="vista-seccion activa">
     <div class="auth-wrapper">
       <div class="auth-left">
         <div>
-          <a href="#" class="text-light text-decoration-none small d-inline-flex align-items-center gap-2 mb-4" onclick="cambiarVista('vista-landing')">
-            <i class="fa-solid fa-chevron-left"></i> Back to Home
-          </a>
-          <div class="mt-2 mb-4">
-            <span class="brand-icon mb-3" style="width:42px; height:42px; font-size:1.2rem;"><i class="fa-solid fa-play"></i></span>
+          <div class="d-flex align-items-center gap-2 mb-4">
+            <span class="brand-icon"><i class="fa-solid fa-play"></i></span>
+            <span class="fw-bold fs-5">stream<span style="color:var(--accent-light)">recorder</span></span>
+            <span class="badge bg-primary bg-opacity-25 text-light border border-primary ms-auto rounded-pill small">OAuth 2.0 / OIDC</span>
+          </div>
+
+          <div class="mt-3 mb-4">
             <h2 class="fw-bold mb-2" id="authTitulo">Sign in to Streamrecorder</h2>
-            <p class="text-secondary small" id="authSubtitulo">Inicia sesión con tu cuenta para gestionar streamers monitoreados y ver todas las grabaciones.</p>
+            <p class="text-secondary small" id="authSubtitulo">
+              Plataforma privada de grabación automática. Inicia sesión o regístrate para monitorear tus propios streamers de forma privada.
+            </p>
           </div>
 
           <div id="alertaAuth" class="alert alert-danger py-2 small" style="display:none;"></div>
+
+          <!-- Botones Federados OAuth 2.0 + OpenID Connect -->
+          <div class="d-flex flex-column gap-2 mb-4">
+            <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('twitch')">
+              <i class="fa-brands fa-twitch" style="color:#9146ff;"></i> Continue with Twitch (OIDC)
+            </button>
+            <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('discord')">
+              <i class="fa-brands fa-discord" style="color:#5865F2;"></i> Continue with Discord (OAuth 2.0)
+            </button>
+            <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('google')">
+              <i class="fa-brands fa-google text-danger"></i> Continue with Google (OIDC)
+            </button>
+          </div>
+
+          <div class="text-center text-secondary small mb-3">— o usa tu cuenta con correo —</div>
 
           <form onsubmit="procesarAuthReal(event)">
             <div class="mb-3" id="campoUsernameReg" style="display:none;">
@@ -152,83 +130,88 @@
             </div>
           </form>
         </div>
+
         <div class="d-flex justify-content-between text-secondary small pt-4 border-top border-secondary border-opacity-10">
-          <span>StreamRecorder Cloud Database</span>
-          <span>Powered by Supabase</span>
+          <span><i class="fa-solid fa-lock me-1"></i>Acceso Privado Requerido</span>
+          <span>Estándar OIDC JWT</span>
         </div>
       </div>
       <div class="auth-right"></div>
     </div>
   </div>
 
-  <!-- VISTA 3 Y 4: DASHBOARD, RECORDINGS Y MONITORED STREAMERS -->
+  <!-- =====================================================================
+       PANTALLA 2: PANEL PRIVADO DEL USUARIO AUTENTICADO
+  ====================================================================== -->
   <div id="vista-app" class="vista-seccion">
     <header class="app-header">
       <div class="d-flex align-items-center gap-4">
-        <a class="brand-logo" href="#" onclick="cambiarVista('vista-landing')">
+        <a class="brand-logo" href="#" onclick="mostrarTab('tab-dashboard')">
           <span class="brand-icon"><i class="fa-solid fa-play"></i></span>
           <span class="d-none d-sm-inline">stream<span style="color:var(--accent-light)">recorder</span></span>
         </a>
-        <!-- Buscador Superior para Agregar un Streamer Nuevo a la Base de Datos -->
         <div class="header-search d-none d-md-flex">
           <i class="fa-brands fa-twitch text-primary"></i>
-          <input type="text" id="inputNuevoStreamerTop" placeholder="Escribe un canal de Twitch para monitorear (ej. illojuan)...">
+          <input type="text" id="inputNuevoStreamerTop" placeholder="Monitorear streamer en mi cuenta privada (ej. illojuan)...">
           <button class="btn btn-sm btn-purple py-1 px-3" onclick="agregarStreamerMonitoreado('inputNuevoStreamerTop')">+ Vigilar</button>
         </div>
       </div>
 
       <div class="d-flex align-items-center gap-3">
+        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2 rounded-pill small d-none d-md-inline">
+          <i class="fa-solid fa-shield-halved me-1"></i> Sesión OIDC Activa
+        </span>
         <div class="d-flex align-items-center gap-2">
-          <div class="rounded-circle bg-primary d-flex align-items-center justify-content-center fw-bold" style="width:35px; height:35px;" id="userInitial">I</div>
-          <span class="small fw-medium d-none d-lg-inline" id="userNameDisplay">Invitado</span>
+          <div class="rounded-circle bg-primary d-flex align-items-center justify-content-center fw-bold" style="width:35px; height:35px;" id="userInitial">U</div>
+          <span class="small fw-medium d-none d-lg-inline" id="userNameDisplay">Usuario</span>
         </div>
-        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" id="btnCerrarSesion" style="display:none;" onclick="cerrarSesionReal()">Salir</button>
+        <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="cerrarSesionReal()">
+          <i class="fa-solid fa-right-from-bracket me-1"></i>Salir
+        </button>
       </div>
     </header>
 
     <div class="app-body">
       <aside class="app-sidebar d-none d-md-block">
-        <a class="nav-item-side active" id="menu-dashboard" onclick="mostrarTab('tab-dashboard')"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
-        <a class="nav-item-side" id="menu-recordings" onclick="mostrarTab('tab-recordings')"><i class="fa-solid fa-video"></i> Recordings</a>
-        <a class="nav-item-side" id="menu-monitored" onclick="mostrarTab('tab-monitored')"><i class="fa-solid fa-tower-broadcast"></i> Monitored Streamers</a>
-        <hr class="border-secondary border-opacity-25 my-3">
-        <a class="nav-item-side" onclick="cambiarVista('vista-landing')"><i class="fa-solid fa-house"></i> Inicio</a>
+        <a class="nav-item-side active" id="menu-dashboard" onclick="mostrarTab('tab-dashboard')"><i class="fa-solid fa-gauge-high"></i> Mi Dashboard</a>
+        <a class="nav-item-side" id="menu-recordings" onclick="mostrarTab('tab-recordings')"><i class="fa-solid fa-video"></i> Mis Grabaciones</a>
+        <a class="nav-item-side" id="menu-monitored" onclick="mostrarTab('tab-monitored')"><i class="fa-solid fa-tower-broadcast"></i> Mis Streamers</a>
       </aside>
 
       <main class="app-content">
-        <!-- 4 KPI Cards -->
+        <!-- 4 KPI Cards Privadas del Usuario -->
         <div class="row g-3 mb-4">
-          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Total Recordings</div><div class="kpi-value" id="kpiTotal">0</div></div></div>
-          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Estado del Robot</div><div class="kpi-value text-success">24/7 Activo</div></div></div>
-          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Base de Datos</div><div class="kpi-value" style="color:var(--accent-light)" id="estadoDBTexto">Conectando...</div></div></div>
-          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Streamers Monitored</div><div class="kpi-value" id="kpiStreamers">0</div></div></div>
+          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Mis Grabaciones</div><div class="kpi-value" id="kpiTotal">0</div></div></div>
+          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Privacidad</div><div class="kpi-value text-success">Privado</div></div></div>
+          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Calidad</div><div class="kpi-value" style="color:var(--accent-light)">1080p60</div></div></div>
+          <div class="col-6 col-xl-3"><div class="kpi-card"><div class="kpi-title">Mis Streamers (Máx 5)</div><div class="kpi-value" id="kpiStreamers">0 / 5</div></div></div>
         </div>
 
-        <!-- SUB-TAB: DASHBOARD -->
+        <!-- SUB-TAB: MI DASHBOARD -->
         <div id="tab-dashboard" class="sub-tab">
           <div class="mb-5">
             <div class="d-flex justify-content-between align-items-center mb-3">
-              <h5 class="fw-bold m-0"><i class="fa-solid fa-satellite-dish text-success me-2"></i>Streamers Monitoreados Actualmente</h5>
-              <button class="btn-outline-purple btn-sm" onclick="mostrarTab('tab-monitored')">+ Agregar Canal</button>
+              <h5 class="fw-bold m-0"><i class="fa-solid fa-satellite-dish text-success me-2"></i>Mis Streamers Vigilados (Privado)</h5>
+              <button class="btn-outline-purple btn-sm" onclick="mostrarTab('tab-monitored')">+ Gestionar Mis Canales</button>
             </div>
             <div class="row g-3" id="dashboardLiveBox"></div>
           </div>
 
           <div>
             <div class="d-flex justify-content-between align-items-center mb-3">
-              <h5 class="fw-bold m-0">Latest Recordings</h5>
-              <button class="btn btn-sm text-secondary" onclick="mostrarTab('tab-recordings')">Ver todos <i class="fa-solid fa-chevron-right ms-1"></i></button>
+              <h5 class="fw-bold m-0">Últimas Grabaciones de Mis Streamers</h5>
+              <button class="btn btn-sm text-secondary" onclick="mostrarTab('tab-recordings')">Ver todas <i class="fa-solid fa-chevron-right ms-1"></i></button>
             </div>
             <div class="row g-4" id="dashboardLatestGrid"></div>
           </div>
         </div>
 
-        <!-- SUB-TAB: RECORDINGS -->
+        <!-- SUB-TAB: MIS RECORDINGS -->
         <div id="tab-recordings" class="sub-tab" style="display:none;">
           <div class="filter-bar">
             <div class="row g-3 align-items-end">
               <div class="col-12 col-md-4">
-                <label class="small text-secondary mb-1">Search recordings</label>
+                <label class="small text-secondary mb-1">Buscar en mis grabaciones</label>
                 <div class="header-search w-100">
                   <i class="fa-solid fa-magnifying-glass text-secondary"></i>
                   <input type="text" id="recSearchInput" placeholder="Filtrar por streamer, título o fecha..." oninput="renderizarSeccionRecordings()">
@@ -268,13 +251,15 @@
           <div id="contenedorRecordingsVista"></div>
         </div>
 
-        <!-- SUB-TAB: MONITORED STREAMERS (GESTIÓN EN TIEMPO REAL) -->
+        <!-- SUB-TAB: MIS STREAMERS MONITOREADOS -->
         <div id="tab-monitored" class="sub-tab" style="display:none;">
           <div class="kpi-card mb-4">
-            <h5 class="fw-bold mb-2"><i class="fa-brands fa-twitch text-primary me-2"></i>Agregar Nuevo Streamer al Vigilante 24/7</h5>
-            <p class="text-secondary small mb-3">Escribe el nombre de usuario exacto de Twitch (ej. <code>tei</code>, <code>illojuan</code>, <code>auronplay</code>) para guardarlo en la base de datos.</p>
+            <h5 class="fw-bold mb-2"><i class="fa-brands fa-twitch text-primary me-2"></i>Monitorear Streamer en Mi Cuenta Privada (Máximo 5)</h5>
+            <p class="text-secondary small mb-3">
+              Solo tú podrás ver los canales que agregues aquí y sus grabaciones. Escribe únicamente el usuario de Twitch (letras, números o guion bajo).
+            </p>
             <div class="d-flex gap-2" style="max-width:500px;">
-              <input type="text" id="inputNuevoStreamerTab" class="auth-input py-2" placeholder="Nombre del canal de Twitch...">
+              <input type="text" id="inputNuevoStreamerTab" class="auth-input py-2" placeholder="Ej: illojuan">
               <button class="btn-purple" onclick="agregarStreamerMonitoreado('inputNuevoStreamerTab')">Agregar Canal</button>
             </div>
           </div>
@@ -284,12 +269,16 @@
     </div>
   </div>
 
-  <!-- MODAL REPRODUCTOR -->
+  <!-- MODAL REPRODUCTOR CON SELECTOR DE SERVIDOR -->
   <div class="modal fade" id="reproductorModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered">
       <div class="modal-content" style="background: var(--bg-card); border: 1px solid var(--border-color);">
         <div class="modal-header border-secondary border-opacity-25">
           <h6 class="modal-title fw-bold m-0" id="modalTitulo">Reproduciendo Stream</h6>
+          <div class="ms-auto me-3 btn-group btn-group-sm" id="selectorServidorGroup" style="display:none;">
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('drive')">Servidor 1 (Drive Rápido)</button>
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('archive')">Servidor 2 (Archivo Infinito)</button>
+          </div>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body p-0 bg-black">
@@ -307,87 +296,142 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    // =========================================================================
-    // PEGA AQUÍ TUS DOS DATOS DE SUPABASE (DEL PASO 4) ENTRE LAS COMILLAS:
-    // =========================================================================
     const SUPABASE_URL = "https://gdbhnosrfsayyevfdjde.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkYmhub3NyZnNheXlldmZkamRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwMjcwNTEsImV4cCI6MjEwNzYwMzA1MX0.zdapm_CZx_aYBrEy4bnjvogDFu7Jg0Cg0x4Cw7ZiLfY";
-    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
 
     let videosGlobal = [];
     let streamersMonitoreados = [];
     let usuarioActual = null;
     let vistaRecActual = 'list';
     let modoAuthActual = 'login';
+    let videoModalActual = null;
 
+    // 1. GUARDIÁN DE SESIÓN ESTRICTO: Si no hay sesión, bloquea todo y exige Login
     async function inicializarApp() {
-      // 1. Verificar sesión real en Supabase
       const { data: { session } } = await db.auth.getSession();
-      actualizarEstadoUsuario(session?.user || null);
+      verificarAccesoObligatorio(session?.user || null);
 
       db.auth.onAuthStateChange((_event, session) => {
-        actualizarEstadoUsuario(session?.user || null);
+        verificarAccesoObligatorio(session?.user || null);
       });
-
-      await cargarDatosDesdeSupabase();
     }
 
-    function actualizarEstadoUsuario(user) {
+    async function verificarAccesoObligatorio(user) {
       usuarioActual = user;
-      if (user) {
-        const nombre = user.user_metadata?.username || user.email.split('@')[0];
-        document.getElementById('userNameDisplay').innerText = nombre;
-        document.getElementById('userInitial').innerText = nombre.charAt(0).toUpperCase();
-        document.getElementById('btnCerrarSesion').style.display = 'inline-block';
-        document.getElementById('btnNavLogin').innerText = nombre;
-      } else {
-        document.getElementById('userNameDisplay').innerText = 'Invitado';
-        document.getElementById('userInitial').innerText = 'I';
-        document.getElementById('btnCerrarSesion').style.display = 'none';
-        document.getElementById('btnNavLogin').innerText = 'Sign In';
+      if (!user) {
+        // Cero Modo Invitado: Forzar vista de Login/Registro y limpiar datos en memoria
+        streamersMonitoreados = [];
+        videosGlobal = [];
+        cambiarVista('vista-auth');
+        return;
+      }
+
+      // Usuario autenticado válidamente mediante OIDC / JWT
+      const nombre = user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.username || user.email.split('@')[0];
+      document.getElementById('userNameDisplay').innerText = nombre;
+      document.getElementById('userInitial').innerText = nombre.charAt(0).toUpperCase();
+      
+      cambiarVista('vista-app');
+      await cargarDatosPrivadosUsuario();
+    }
+
+    // 2. OAuth 2.0 + OpenID Connect (OIDC) Login Social
+    async function loginOAuthOIDC(proveedor) {
+      const alerta = document.getElementById('alertaAuth');
+      alerta.style.display = 'none';
+      const { error } = await db.auth.signInWithOAuth({
+        provider: proveedor,
+        options: {
+          redirectTo: window.location.origin + window.location.pathname,
+          scopes: 'openid email profile'
+        }
+      });
+      if (error) {
+        alerta.innerText = `Para usar ${proveedor.toUpperCase()} OAuth 2.0, actívalo primero en Supabase -> Authentication -> Providers.`;
+        alerta.style.display = 'block';
       }
     }
 
-    async function cargarDatosDesdeSupabase() {
+    // 3. Cargar ÚNICAMENTE los streamers de este usuario y sus grabaciones correspondientes
+    async function cargarDatosPrivadosUsuario() {
+      if (!usuarioActual) return;
       try {
-        const { data: stData, error: errSt } = await db.from('streamers_monitoreados').select('*').order('created_at', { ascending: false });
-        const { data: vidData, error: errVid } = await db.from('grabaciones').select('*').order('created_at', { ascending: false });
+        // Gracias a RLS en Supabase, esta consulta devuelve SOLO los canales donde user_id == usuarioActual.id
+        const { data: stData, error: errSt } = await db
+          .from('streamers_monitoreados')
+          .select('*')
+          .eq('user_id', usuarioActual.id)
+          .order('created_at', { ascending: false });
 
-        if (!errSt && stData) streamersMonitoreados = stData;
-        if (!errVid && vidData) videosGlobal = vidData;
+        streamersMonitoreados = (!errSt && stData) ? stData : [];
 
-        document.getElementById('estadoDBTexto').innerText = 'Online';
+        // Filtrar grabaciones: el usuario solo ve los VODs de los streamers que tiene en su lista privada
+        const misCanales = streamersMonitoreados.map(s => s.streamer.toLowerCase());
+        if (misCanales.length > 0) {
+          const { data: vidData, error: errVid } = await db
+            .from('grabaciones')
+            .select('*')
+            .in('streamer', misCanales)
+            .order('created_at', { ascending: false });
+          videosGlobal = (!errVid && vidData) ? vidData : [];
+        } else {
+          videosGlobal = [];
+        }
       } catch (e) {
-        document.getElementById('estadoDBTexto').innerText = 'Modo Local';
+        console.error(e);
       }
       actualizarTodoUI();
     }
 
-    // Agregar un nuevo streamer a la base de datos desde la web
+    // 4. Agregar streamer validando formato estricto de Twitch y asociándolo al user_id privado
     async function agregarStreamerMonitoreado(idInput) {
-      const inp = document.getElementById(idInput);
-      const canal = inp.value.trim().toLowerCase().replace('https://www.twitch.tv/', '').replace('/', '');
-      if (!canal) return alert('Escribe el nombre del canal de Twitch.');
+      if (!usuarioActual) return cambiarVista('vista-auth');
 
-      const autor = usuarioActual ? (usuarioActual.user_metadata?.username || usuarioActual.email) : 'visitante';
-      const { error } = await db.from('streamers_monitoreados').insert([{ streamer: canal, agregado_por: autor }]);
+      const inp = document.getElementById(idInput);
+      const canal = inp.value.trim().toLowerCase()
+        .replace('https://www.twitch.tv/', '')
+        .replace('https://twitch.tv/', '')
+        .replace('/', '');
+
+      // Validación estricta anti-spam: solo letras, números y guion bajo (2 a 25 caracteres)
+      const regexTwitch = /^[a-z0-9_]{2,25}$/;
+      if (!regexTwitch.test(canal)) {
+        return alert('Nombre inválido. Escribe un usuario real de Twitch (solo letras, números o guion bajo, de 2 a 25 caracteres).');
+      }
+
+      if (streamersMonitoreados.length >= 5) {
+        return alert('Has alcanzado el límite de 5 streamers monitoreados en tu cuenta.');
+      }
+
+      const autor = usuarioActual.user_metadata?.username || usuarioActual.email;
+      const { error } = await db.from('streamers_monitoreados').insert([{
+        streamer: canal,
+        agregado_por: autor,
+        user_id: usuarioActual.id
+      }]);
 
       if (error) {
-        alert('Este canal ya está en la lista de monitoreo o revisa tu conexión a Supabase.');
+        alert(error.message.includes('unique') ? 'Ya tienes a este streamer en tu lista privada.' : error.message);
       } else {
         inp.value = '';
-        await cargarDatosDesdeSupabase();
-        alert(`¡Canal "${canal}" agregado al vigilante 24/7 con éxito!`);
+        await cargarDatosPrivadosUsuario();
       }
     }
 
     async function eliminarStreamerMonitoreado(id) {
-      if (!confirm('¿Dejar de monitorear este canal?')) return;
-      await db.from('streamers_monitoreados').delete().eq('id', id);
-      await cargarDatosDesdeSupabase();
+      if (!confirm('¿Quitar este streamer de tu monitoreo privado?')) return;
+      await db.from('streamers_monitoreados').delete().eq('id', id).eq('user_id', usuarioActual.id);
+      await cargarDatosPrivadosUsuario();
     }
 
-    // Login y Registro Real en Supabase
     async function procesarAuthReal(e) {
       e.preventDefault();
       const email = document.getElementById('authEmail').value.trim();
@@ -405,56 +449,57 @@
         if (error) {
           alerta.innerText = error.message;
           alerta.style.display = 'block';
-        } else {
-          cambiarVista('vista-app');
-          mostrarTab('tab-dashboard');
         }
       } else {
         const { error } = await db.auth.signInWithPassword({ email, password });
         if (error) {
           alerta.innerText = 'Correo o contraseña incorrectos.';
           alerta.style.display = 'block';
-        } else {
-          cambiarVista('vista-app');
-          mostrarTab('tab-dashboard');
         }
       }
     }
 
     async function cerrarSesionReal() {
       await db.auth.signOut();
-      cambiarVista('vista-landing');
+      verificarAccesoObligatorio(null);
     }
 
     function actualizarTodoUI() {
-      document.getElementById('landTotalVods').innerText = videosGlobal.length;
-      document.getElementById('landTotalStreamers').innerText = streamersMonitoreados.length;
       document.getElementById('kpiTotal').innerText = videosGlobal.length;
-      document.getElementById('kpiStreamers').innerText = streamersMonitoreados.length;
+      document.getElementById('kpiStreamers').innerText = `${streamersMonitoreados.length} / 5`;
 
-      document.getElementById('landingGridVideos').innerHTML = videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true)).join('');
-      document.getElementById('dashboardLatestGrid').innerHTML = videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true)).join('');
-
-      // Tarjetas de Streamers Monitoreados en el Dashboard
-      document.getElementById('dashboardLiveBox').innerHTML = streamersMonitoreados.map(st => `
-        <div class="col-12 col-md-6 col-xl-4">
-          <div class="vod-card p-3 d-flex align-items-center justify-content-between" onclick="window.open('https://www.twitch.tv/${st.streamer}', '_blank')">
-            <div class="d-flex align-items-center gap-3">
-              <img src="${st.avatar}" class="streamer-avatar" style="width:50px; height:50px;">
-              <div>
-                <div class="d-flex align-items-center gap-2">
-                  <span class="fw-bold fs-6">${st.streamer}</span>
-                  <span class="badge bg-danger rounded-pill" style="font-size:0.65rem;">ALWAYS ON</span>
-                </div>
-                <div class="text-secondary small mt-1">Agregado por: ${st.agregado_por}</div>
-              </div>
+      if (streamersMonitoreados.length === 0) {
+        document.getElementById('dashboardLiveBox').innerHTML = `
+          <div class="col-12">
+            <div class="p-4 rounded-3 text-center border border-secondary border-opacity-25" style="background:var(--bg-card);">
+              <p class="text-secondary mb-2">Aún no has agregado ningún streamer a tu lista privada.</p>
+              <button class="btn-purple btn-sm" onclick="mostrarTab('tab-monitored')">+ Agregar mi primer Streamer</button>
             </div>
-            <i class="fa-solid fa-satellite-dish text-success fs-4"></i>
+          </div>`;
+      } else {
+        document.getElementById('dashboardLiveBox').innerHTML = streamersMonitoreados.map(st => `
+          <div class="col-12 col-md-6 col-xl-4">
+            <div class="vod-card p-3 d-flex align-items-center justify-content-between" onclick="window.open('https://www.twitch.tv/${st.streamer}', '_blank')">
+              <div class="d-flex align-items-center gap-3">
+                <img src="${st.avatar}" class="streamer-avatar" style="width:50px; height:50px;">
+                <div>
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="fw-bold fs-6">${st.streamer}</span>
+                    <span class="badge bg-danger rounded-pill" style="font-size:0.65rem;">ALWAYS ON</span>
+                  </div>
+                  <div class="text-secondary small mt-1">Monitoreo Privado Activo</div>
+                </div>
+              </div>
+              <i class="fa-solid fa-satellite-dish text-success fs-4"></i>
+            </div>
           </div>
-        </div>
-      `).join('');
+        `).join('');
+      }
 
-      // Pestaña Monitored Streamers con botón de eliminar
+      document.getElementById('dashboardLatestGrid').innerHTML = videosGlobal.length
+        ? videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true)).join('')
+        : '<div class="col-12 text-secondary small">Aún no hay grabaciones para tus streamers monitoreados.</div>';
+
       document.getElementById('listaCanalesMonitoreados').innerHTML = streamersMonitoreados.map(st => {
         const cant = videosGlobal.filter(x => x.streamer === st.streamer).length;
         return `
@@ -464,7 +509,7 @@
                 <img src="${st.avatar}" class="streamer-avatar">
                 <div>
                   <span class="fw-bold">${st.streamer}</span>
-                  <div class="small text-secondary">${cant} grabaciones guardadas</div>
+                  <div class="small text-secondary">${cant} grabaciones disponibles</div>
                 </div>
               </div>
               <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="eliminarStreamerMonitoreado(${st.id})">
@@ -526,7 +571,7 @@
 
       const cont = document.getElementById('contenedorRecordingsVista');
       if (filtrados.length === 0) {
-        cont.innerHTML = `<div class="text-center text-secondary py-5">No se encontraron grabaciones.</div>`;
+        cont.innerHTML = `<div class="text-center text-secondary py-5">No hay grabaciones para mostrar en tu cuenta.</div>`;
         return;
       }
 
@@ -579,19 +624,13 @@
     }
 
     function mostrarTab(id) {
+      if (!usuarioActual) return cambiarVista('vista-auth');
       document.querySelectorAll('.sub-tab').forEach(el => el.style.display = 'none');
       document.getElementById(id).style.display = 'block';
       document.querySelectorAll('.nav-item-side').forEach(el => el.classList.remove('active'));
       if (id === 'tab-dashboard') document.getElementById('menu-dashboard').classList.add('active');
       if (id === 'tab-recordings') document.getElementById('menu-recordings').classList.add('active');
       if (id === 'tab-monitored') document.getElementById('menu-monitored').classList.add('active');
-    }
-
-    function buscarOMonitorearDesdeLanding() {
-      const val = document.getElementById('landingInputStreamer').value.trim();
-      cambiarVista('vista-app');
-      mostrarTab('tab-monitored');
-      document.getElementById('inputNuevoStreamerTab').value = val;
     }
 
     function modoAuth(modo) {
@@ -609,32 +648,42 @@
       inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
-   function abrirModalVideo(idx) {
+    function abrirModalVideo(idx) {
       const v = videosGlobal[idx];
       if (!v) return;
+      videoModalActual = v;
       document.getElementById('modalTitulo').innerText = v.titulo;
       document.getElementById('modalMeta').innerText = `Streamer: ${v.streamer} • Fecha: ${v.fecha}`;
       
       const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
-      const linkDescarga = v.url_permanente || linkDrive;
-      document.getElementById('modalBotonDrive').href = linkDescarga;
+      document.getElementById('modalBotonDrive').href = linkDrive;
 
-      const iframeCont = document.getElementById('contenedorIframe');
-      if (v.url_permanente && v.url_permanente.startsWith('http')) {
-        // Reproductor HTML5 directo sin límite de visitas (Internet Archive)
-        iframeCont.innerHTML = `
-          <video controls autoplay style="width:100%; height:100%; background:#000;">
-            <source src="${v.url_permanente}" type="video/mp4">
-            <iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>
-          </video>`;
-      } else if (v.drive_id) {
-        // Reproductor rápido de Google Drive
-        iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
-      } else {
-        iframeCont.innerHTML = `<div class="d-flex flex-column justify-content-center align-items-center text-center p-4"><i class="fa-brands fa-google-drive fa-3x text-primary mb-3"></i><h5>Video listo en la nube</h5></div>`;
+      const tieneAmbos = v.drive_id && v.url_permanente && v.url_permanente.startsWith('http');
+      document.getElementById('selectorServidorGroup').style.display = tieneAmbos ? 'inline-flex' : 'none';
+
+      // Por defecto abre Drive (que está disponible al segundo 1) y permite alternar a Internet Archive
+      if (v.drive_id) {
+        cambiarServidorReproductor('drive');
+      } else if (v.url_permanente) {
+        cambiarServidorReproductor('archive');
       }
       new bootstrap.Modal(document.getElementById('reproductorModal')).show();
     }
+
+    function cambiarServidorReproductor(servidor) {
+      const v = videoModalActual;
+      if (!v) return;
+      const iframeCont = document.getElementById('contenedorIframe');
+      if (servidor === 'drive' && v.drive_id) {
+        iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+      } else if (v.url_permanente) {
+        iframeCont.innerHTML = `<video controls autoplay style="width:100%; height:100%; background:#000;"><source src="${v.url_permanente}" type="video/mp4"></video>`;
+      }
+    }
+
+    document.getElementById('reproductorModal').addEventListener('hidden.bs.modal', () => {
+      document.getElementById('contenedorIframe').innerHTML = '';
+    });
 
     inicializarApp();
   </script>
