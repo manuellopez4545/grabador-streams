@@ -428,16 +428,17 @@
       await cargarDatosPrivadosUsuario();
     }
 
-    async function procesarAuthReal(e) {
+async function procesarAuthReal(e) {
       e.preventDefault();
       const email = document.getElementById('authEmail').value.trim();
       const password = document.getElementById('authPass').value;
       const username = document.getElementById('authUsername').value.trim();
       const alerta = document.getElementById('alertaAuth');
+      alerta.className = 'alert alert-danger py-2 small';
       alerta.style.display = 'none';
 
       if (modoAuthActual === 'register') {
-        const { error } = await db.auth.signUp({
+        const { data, error } = await db.auth.signUp({
           email,
           password,
           options: { data: { username: username || email.split('@')[0] } }
@@ -445,11 +446,16 @@
         if (error) {
           alerta.innerText = error.message;
           alerta.style.display = 'block';
+        } else if (data?.user && !data?.session) {
+          // Si "Confirm email" sigue encendido en Supabase, avisa claramente al usuario
+          alerta.className = 'alert alert-success py-2 small';
+          alerta.innerText = '¡Cuenta creada! Revisa tu correo electrónico para confirmar tu cuenta (o desactiva "Confirm email" en Supabase).';
+          alerta.style.display = 'block';
         }
       } else {
         const { error } = await db.auth.signInWithPassword({ email, password });
         if (error) {
-          alerta.innerText = 'Correo o contraseña incorrectos.';
+          alerta.innerText = 'Correo o contraseña incorrectos (o falta confirmar tu correo).';
           alerta.style.display = 'block';
         }
       }
