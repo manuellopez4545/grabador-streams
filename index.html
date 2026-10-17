@@ -340,18 +340,26 @@
     }
 
     // 2. OAuth 2.0 + OpenID Connect (OIDC) Login Social
-    async function loginOAuthOIDC(proveedor) {
+async function loginOAuthOIDC(proveedor) {
       const alerta = document.getElementById('alertaAuth');
       alerta.style.display = 'none';
+      
+      const opciones = {
+        redirectTo: window.location.origin + window.location.pathname
+      };
+
+      // Si es Twitch, especificamos sus scopes nativos correctos para evitar el error 400
+      if (proveedor === 'twitch') {
+        opciones.scopes = 'user:read:email';
+      }
+
       const { error } = await db.auth.signInWithOAuth({
         provider: proveedor,
-        options: {
-          redirectTo: window.location.origin + window.location.pathname,
-          scopes: 'openid email profile'
-        }
+        options: opciones
       });
+      
       if (error) {
-        alerta.innerText = `Para usar ${proveedor.toUpperCase()} OAuth 2.0, actívalo primero en Supabase -> Authentication -> Providers.`;
+        alerta.innerText = `Error al conectar con ${proveedor}: ${error.message}`;
         alerta.style.display = 'block';
       }
     }
