@@ -32,9 +32,9 @@ jobs:
           else
             STREAMERS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?activo=eq.true&select=streamer" \
               -H "apikey: $SB_KEY" \
-              -H "Authorization: Bearer $SB_KEY" | jq -r '.[].streamer' | tr '[:upper:]' '[:lower:]')
+              -H "Authorization: Bearer $SB_KEY" | jq -r '.[].streamer' | tr '[:upper:]' '[:lower:]' | sort -u | head -n 20)
           fi
-
+          
           if [ -z "$STREAMERS" ]; then
             echo "hay=no" >> $GITHUB_OUTPUT
             echo "lista=[]" >> $GITHUB_OUTPUT
