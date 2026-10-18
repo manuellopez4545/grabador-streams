@@ -788,7 +788,7 @@
       }
     }
 
-    async function cargarDatosPrivadosUsuario() {
+async function cargarDatosPrivadosUsuario() {
       if (!usuarioActual) return;
       try {
         const { data: stData, error: errSt } = await db
@@ -806,7 +806,12 @@
             .select('*')
             .in('streamer', misCanales)
             .order('created_at', { ascending: false });
-          videosGlobal = (!errVid && vidData) ? vidData : [];
+
+          // Mostrar en mi panel privado solo los VODs donde yo tenía la grabación activa
+          // (o VODs previos que aún no tenían la lista usuarios_activos llena)
+          videosGlobal = (!errVid && vidData)
+            ? vidData.filter(v => !v.usuarios_activos || v.usuarios_activos.length === 0 || v.usuarios_activos.includes(usuarioActual.id))
+            : [];
         } else {
           videosGlobal = [];
         }
@@ -814,6 +819,15 @@
         console.error(e);
       }
       actualizarTodoUI();
+    }
+
+    async function reiniciarGrabacionCanal(id) {
+      if (!confirm('Restart recording? The current segment will be saved and a new recording will start automatically.')) return;
+      await db.from('streamers_monitoreados')
+        .update({ forzar_corte: true, activo: true })
+        .eq('id', id)
+        .eq('user_id', usuarioActual.id);
+      await cargarDatosPrivadosUsuario();
     }
 
     // =========================================================================
