@@ -968,9 +968,71 @@
       verificarAccesoObligatorio(null);
     }
 
+// Función que formatea el tiempo transcurrido desde inicio_grabacion (HH:MM:SS)
+    function calcularTiempoGrabacion(fechaInicioISO) {
+      if (!fechaInicioISO) return '00:00:00';
+      const inicio = new Date(fechaInicioISO).getTime();
+      const ahora = Date.now();
+      const diffSeg = Math.max(0, Math.floor((ahora - inicio) / 1000));
+      const hrs = String(Math.floor(diffSeg / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((diffSeg % 3600) / 60)).padStart(2, '0');
+      const segs = String(diffSeg % 60).padStart(2, '0');
+      return `${hrs}:${mins}:${segs}`;
+    }
+
+    // Reloj que actualiza los cronómetros de grabación en pantalla cada segundo
+    setInterval(() => {
+      document.querySelectorAll('[data-rec-start]').forEach(el => {
+        const startIso = el.getAttribute('data-rec-start');
+        if (startIso) {
+          el.innerText = `REC ${calcularTiempoGrabacion(startIso)}`;
+        }
+      });
+    }, 1000);
+
+    // Refrescar estado desde Supabase cada 20 segundos automáticamente
+    setInterval(() => {
+      if (usuarioActual) cargarDatosPrivadosUsuario();
+    }, 20000);
+
+    // Pausar (Stop) o Reanudar (Start) grabación
+    async function cambiarEstadoGrabacion(id, nuevoEstado) {
+      const cambios = { activo: nuevoEstado };
+      if (!nuevoEstado) {
+        cambios.grabando_ahora = false;
+        cambios.inicio_grabacion = null;
+      }
+      await db.from('streamers_monitoreados').update(cambios).eq('id', id).eq('user_id', usuarioActual.id);
+      await cargarDatosPrivadosUsuario();
+    }
+
+    // Reiniciar grabación (Corta el video actual para que se guarde y vuelve a activar el canal)
+    async function reiniciarGrabacionCanal(id) {
+      if (!confirm('Restart recording? The current recording segment will be saved and a new one will start shortly.')) return;
+      await db.from('streamers_monitoreados')
+        .update({ activo: false, grabando_ahora: false, inicio_grabacion: null })
+        .eq('id', id)
+        .eq('user_id', usuarioActual.id);
+      await cargarDatosPrivadosUsuario();
+
+      setTimeout(async () => {
+        await db.from('streamers_monitoreados')
+          .update({ activo: true })
+          .eq('id', id)
+          .eq('user_id', usuarioActual.id);
+        await cargarDatosPrivadosUsuario();
+      }, 18000);
+    }
+
     function actualizarTodoUI() {
       document.getElementById('kpiTotal').innerText = videosGlobal.length;
       document.getElementById('kpiStreamers').innerText = `${streamersMonitoreados.length} / 5`;
+
+      const enGrabacionCount = streamersMonitoreados.filter(s => s.grabando_ahora && s.activo).length;
+      const statusEl = document.querySelector('#tab-dashboard .kpi-value.text-success');
+      if (statusEl) {
+        statusEl.innerText = enGrabacionCount > 0 ? `${enGrabacionCount} Recording` : 'Always On';
+      }
 
       if (streamersMonitoreados.length === 0) {
         document.getElementById('dashboardLiveBox').innerHTML = `
@@ -981,48 +1043,59 @@
             </div>
           </div>`;
       } else {
-        document.getElementById('dashboardLiveBox').innerHTML = streamersMonitoreados.map(st => `
-          <div class="col-12 col-md-6 col-xl-4">
-            <div class="vod-card p-3 d-flex align-items-center justify-content-between" onclick="window.open('https://www.twitch.tv/${st.streamer}', '_blank')">
-              <div class="d-flex align-items-center gap-3">
-                <img src="${st.avatar}" class="streamer-avatar" style="width:48px; height:48px;">
-                <div>
-                  <div class="d-flex align-items-center gap-2">
-                    <span class="fw-bold fs-6">${st.streamer}</span>
-                    <span class="badge bg-danger rounded-pill" style="font-size:0.65rem;">ALWAYS ON</span>
+        document.getElementById('dashboardLiveBox').innerHTML = streamersMonitoreados.map(st => {
+          const estaGrabando = st.grabando_ahora && st.activo;
+          const badgeEstado = !st.activo
+            ? `<span class="badge bg-secondary rounded-pill" style="font-size:0.65rem;">PAUSED</span>`
+            : estaGrabando
+              ? `<span class="badge bg-danger rounded-pill" style="font-size:0.68rem;" data-rec-start="${st.inicio_grabacion || ''}">REC ${calcularTiempoGrabacion(st.inicio_grabacion)}</span>`
+              : `<span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25 rounded-pill" style="font-size:0.65rem;">STANDBY</span>`;
+
+          return `
+            <div class="col-12 col-md-6 col-xl-4">
+              <div class="vod-card p-3 d-flex flex-column justify-content-between" style="cursor:default;">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                  <div class="d-flex align-items-center gap-3">
+                    <img src="${st.avatar}" class="streamer-avatar" style="width:48px; height:48px;">
+                    <div>
+                      <div class="d-flex align-items-center gap-2">
+                        <a href="https://www.twitch.tv/${st.streamer}" target="_blank" class="fw-bold fs-6 text-light text-decoration-none">${st.streamer}</a>
+                        ${badgeEstado}
+                      </div>
+                      <div class="text-secondary small mt-1">
+                        ${estaGrabando ? 'Recording live stream...' : (st.activo ? 'Waiting for live stream' : 'Monitoring paused')}
+                      </div>
+                    </div>
                   </div>
-                  <div class="text-secondary small mt-1">Twitch Channel</div>
+                </div>
+                <div class="d-flex gap-2 pt-2 border-top border-secondary border-opacity-10">
+                  ${st.activo ? `
+                    <button class="btn btn-sm btn-outline-warning flex-grow-1 rounded-pill" onclick="cambiarEstadoGrabacion(${st.id}, false)">
+                      <i class="fa-solid fa-stop me-1"></i>Stop
+                    </button>
+                    <button class="btn btn-sm btn-outline-light flex-grow-1 rounded-pill" onclick="reiniciarGrabacionCanal(${st.id})">
+                      <i class="fa-solid fa-rotate-right me-1"></i>Restart
+                    </button>
+                  ` : `
+                    <button class="btn btn-sm btn-purple flex-grow-1 rounded-pill py-1" onclick="cambiarEstadoGrabacion(${st.id}, true)">
+                      <i class="fa-solid fa-play me-1"></i>Resume Recording
+                    </button>
+                  `}
+                  <button class="btn btn-sm btn-outline-danger rounded-pill px-3" title="Delete channel" onclick="eliminarStreamerMonitoreado(${st.id})">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
                 </div>
               </div>
-              <i class="fa-solid fa-chevron-right text-secondary"></i>
             </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       }
 
       document.getElementById('dashboardLatestGrid').innerHTML = videosGlobal.length
         ? videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true, 'privado')).join('')
         : '<div class="col-12 text-secondary small">No recordings available yet.</div>';
 
-      document.getElementById('listaCanalesMonitoreados').innerHTML = streamersMonitoreados.map(st => {
-        const cant = videosGlobal.filter(x => x.streamer === st.streamer).length;
-        return `
-          <div class="col-12 col-md-6 col-lg-4">
-            <div class="p-3 rounded-3 border border-secondary border-opacity-25 d-flex justify-content-between align-items-center" style="background:var(--bg-card);">
-              <div class="d-flex align-items-center gap-3">
-                <img src="${st.avatar}" class="streamer-avatar">
-                <div>
-                  <span class="fw-bold">${st.streamer}</span>
-                  <div class="small text-secondary">${cant} recordings</div>
-                </div>
-              </div>
-              <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="eliminarStreamerMonitoreado(${st.id})">
-                <i class="fa-solid fa-trash"></i>
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
+      document.getElementById('listaCanalesMonitoreados').innerHTML = document.getElementById('dashboardLiveBox').innerHTML;
 
       renderizarSeccionRecordings();
     }
