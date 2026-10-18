@@ -144,28 +144,55 @@ jobs:
           echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
           echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
 
-          # Encender cronómetro en vivo en Supabase (grabando_ahora = true + hora exacta)
-          curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
+          # Encender cronómetro SOLO en las filas donde el usuario tiene activo=true
+          curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"avatar\": \"$AVATAR\", \"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\"}" || true
+            -d "{\"avatar\": \"$AVATAR\", \"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\", \"forzar_corte\": false}" || true
 
-          # Vigilante en segundo plano:
-          # 1) Revisa cada 15s si el usuario presionó "Stop" en la página web
-          # 2) Si lleva más de 1 hora, sube los bloques completados a Drive
+          # Guardar lista inicial de usuarios que pidieron grabar este stream
+          USUARIOS_INIT=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&select=user_id" \
+            -H "apikey: $SB_KEY" \
+            -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)] | unique')
+          echo "USUARIOS_ACTIVOS=$USUARIOS_INIT" >> $GITHUB_ENV
+
           (
             while true; do
               sleep 15
-              SIGUE_ACTIVO=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&select=id" \
+              # Consultar estado de todos los usuarios que monitorean este canal
+              ESTADO_CANAL=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=user_id,activo,forzar_corte" \
                 -H "apikey: $SB_KEY" \
-                -H "Authorization: Bearer $SB_KEY" | jq 'length')
+                -H "Authorization: Bearer $SB_KEY")
 
+              SIGUE_ACTIVO=$(echo "$ESTADO_CANAL" | jq '[.[] | select(.activo == true)] | length')
+              PIDIO_REINICIO=$(echo "$ESTADO_CANAL" | jq '[.[] | select(.forzar_corte == true)] | length')
+
+              # Si NINGÚN usuario lo tiene activo (todos dieron Stop), detener grabación
               if [ "$SIGUE_ACTIVO" -eq 0 ]; then
-                echo "🛑 El usuario detuvo la grabación desde la web. Guardando video..."
+                echo "🛑 Todos los usuarios detuvieron la grabación de $CANAL. Cerrando archivo..."
                 pkill -INT -f "streamlink" || true
                 break
               fi
+
+              # Si algún usuario presionó "Restart", limpiar bandera y cortar archivo para guardarlo ya
+              if [ "$PIDIO_REINICIO" -gt 0 ]; then
+                echo "🔄 Reinicio solicitado desde la web. Guardando segmento actual..."
+                curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
+                  -H "apikey: $SB_KEY" \
+                  -H "Authorization: Bearer $SB_KEY" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"forzar_corte\": false}" || true
+                pkill -INT -f "streamlink" || true
+                break
+              fi
+
+              # Sincronizar reloj para nuevos usuarios que le hayan dado Resume a mitad del directo
+              curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&grabando_ahora=eq.false" \
+                -H "apikey: $SB_KEY" \
+                -H "Authorization: Bearer $SB_KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\"}" || true
 
               TOTAL_TS=$(ls -1 grabaciones/*.ts 2>/dev/null | wc -l)
               if [ "$TOTAL_TS" -gt 1 ]; then
@@ -186,7 +213,7 @@ jobs:
             -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}_Parte_%02d.ts" || true
 
           kill $SUBIDOR_PID 2>/dev/null || true
-
+          
       - name: 5. Subir a Drive + Archivo Infinito y Apagar Cronómetro
         if: always()
         env:
@@ -196,12 +223,20 @@ jobs:
           IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
           REPO: ${{ github.repository }}
         run: |
-          # Apagar el indicador 'grabando_ahora' en la web apenas finalice o se detenga el stream
+          # Obtener usuarios finales que seguían con la grabación activa o la iniciaron
+          USUARIOS_FIN=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&select=user_id" \
+            -H "apikey: $SB_KEY" \
+            -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)]')
+          
+          # Combinar usuarios que estuvieron activos al inicio o al final del stream
+          LISTA_USUARIOS=$(jq -c -n --argjson u1 "${USUARIOS_ACTIVOS:-[]}" --argjson u2 "${USUARIOS_FIN:-[]}" '($u1 + $u2) | unique')
+
+          # Apagar el indicador 'grabando_ahora' al terminar
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"grabando_ahora\": false, \"inicio_grabacion\": null}" || true
+            -d "{\"grabando_ahora\": false, \"inicio_grabacion\": null, \"forzar_corte\": false}" || true
 
           if [ -d "grabaciones" ]; then
             for archivo in grabaciones/*.ts; do
@@ -253,14 +288,14 @@ jobs:
                 --arg di "$DRIVE_ID" \
                 --arg ul "$LINK_DRIVE" \
                 --arg up "$URL_PERMANENTE" \
-                '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up}')
+                --argjson ua "$LISTA_USUARIOS" \
+                '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
 
               curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
                 -H "apikey: $SB_KEY" \
                 -H "Authorization: Bearer $SB_KEY" \
                 -H "Content-Type: application/json" \
                 -d "$BODY_JSON"
-                
               echo "¡Video guardado en Drive y publicado en la web con éxito!"
             done
           fi
