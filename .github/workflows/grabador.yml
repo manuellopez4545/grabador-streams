@@ -120,7 +120,7 @@ jobs:
           secret_access_key = $IA_SECRET
           EOF
 
-      - name: 4. Obtener metadatos de Twitch y Grabar a ${{ matrix.canal }}
+      - name: 4. Obtener metadatos, activar cronómetro y Grabar a ${{ matrix.canal }}
         env:
           CANAL: ${{ matrix.canal }}
           SB_URL: ${{ secrets.SUPABASE_URL }}
@@ -129,6 +129,7 @@ jobs:
           mkdir -p grabaciones thumbs
           FECHA_CARPETA=$(date +"%Y-%m-%d")
           HORA_INICIO=$(date +"%H-%M-%S")
+          AHORA_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
 
           INFO_TWITCH=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
@@ -143,15 +144,29 @@ jobs:
           echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
           echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
 
+          # Encender cronómetro en vivo en Supabase (grabando_ahora = true + hora exacta)
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"avatar\": \"$AVATAR\"}" || true
+            -d "{\"avatar\": \"$AVATAR\", \"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\"}" || true
 
+          # Vigilante en segundo plano:
+          # 1) Revisa cada 15s si el usuario presionó "Stop" en la página web
+          # 2) Si lleva más de 1 hora, sube los bloques completados a Drive
           (
             while true; do
-              sleep 45
+              sleep 15
+              SIGUE_ACTIVO=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&select=id" \
+                -H "apikey: $SB_KEY" \
+                -H "Authorization: Bearer $SB_KEY" | jq 'length')
+
+              if [ "$SIGUE_ACTIVO" -eq 0 ]; then
+                echo "🛑 El usuario detuvo la grabación desde la web. Guardando video..."
+                pkill -INT -f "streamlink" || true
+                break
+              fi
+
               TOTAL_TS=$(ls -1 grabaciones/*.ts 2>/dev/null | wc -l)
               if [ "$TOTAL_TS" -gt 1 ]; then
                 for archivo in $(ls -1tr grabaciones/*.ts | head -n -1); do
@@ -172,7 +187,7 @@ jobs:
 
           kill $SUBIDOR_PID 2>/dev/null || true
 
-      - name: 5. Subir a Drive + Archivo Infinito (100% Seguro sin auto-borrado)
+      - name: 5. Subir a Drive + Archivo Infinito y Apagar Cronómetro
         if: always()
         env:
           CANAL: ${{ matrix.canal }}
@@ -181,6 +196,13 @@ jobs:
           IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
           REPO: ${{ github.repository }}
         run: |
+          # Apagar el indicador 'grabando_ahora' en la web apenas finalice o se detenga el stream
+          curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
+            -H "apikey: $SB_KEY" \
+            -H "Authorization: Bearer $SB_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"grabando_ahora\": false, \"inicio_grabacion\": null}" || true
+
           if [ -d "grabaciones" ]; then
             for archivo in grabaciones/*.ts; do
               [ -e "$archivo" ] || continue
@@ -199,12 +221,10 @@ jobs:
               URL_PERMANENTE=""
               if [ -n "$IA_ACCESS" ]; then
                 BUCKET_IA="sr-vod-${CANAL}-${FECHA_CARPETA}"
-                echo "Subiendo copia a Internet Archive ($BUCKET_IA)..."
                 rclone copy "$nombre_mp4" "archivo_infinito:$BUCKET_IA/" --ignore-errors || true
                 URL_PERMANENTE="https://archive.org/download/$BUCKET_IA/$NOMBRE_BASE"
               fi
 
-              echo "Subiendo archivo MP4 a Google Drive..."
               rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
               LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "$URL_PERMANENTE")
               DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
@@ -240,7 +260,7 @@ jobs:
                 -H "Authorization: Bearer $SB_KEY" \
                 -H "Content-Type: application/json" \
                 -d "$BODY_JSON"
-              
+                
               echo "¡Video guardado en Drive y publicado en la web con éxito!"
             done
           fi
