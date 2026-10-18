@@ -264,4 +264,707 @@
       color: #fff;
       font-size: 0.74rem;
       padding: 2px 7px;
-      border-radius: 4px
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .vod-info { padding: 0.95rem; }
+    .streamer-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid var(--accent);
+      flex-shrink: 0;
+    }
+    .vod-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .badge-cat {
+      background: rgba(46,204,113,0.14);
+      color: #2ecc71;
+      border: 1px solid rgba(46,204,113,0.28);
+      font-size: 0.68rem;
+      padding: 2px 9px;
+      border-radius: 50px;
+    }
+    .badge-res {
+      background: rgba(231,76,60,0.16);
+      color: #ff7675;
+      border: 1px solid rgba(231,76,60,0.32);
+      font-size: 0.68rem;
+      padding: 2px 9px;
+      border-radius: 50px;
+    }
+
+    /* Recordings Filters & Accordion */
+    .filter-bar {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .streamer-accordion {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      margin-bottom: 0.8rem;
+      overflow: hidden;
+    }
+    .streamer-row {
+      padding: 0.95rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .streamer-row:hover { background: var(--bg-card-hover); }
+    .streamer-drawer {
+      display: none;
+      padding: 1.25rem;
+      border-top: 1px solid var(--border-color);
+      background: rgba(11,12,20,0.45);
+    }
+    .streamer-drawer.abierto { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- =====================================================================
+       VISTA 1: INICIO DE SESIÓN Y REGISTRO
+  ====================================================================== -->
+  <div id="vista-auth" class="vista-seccion activa">
+    <div class="auth-wrapper">
+      <div class="auth-left">
+        <div>
+          <div class="mb-4">
+            <span class="brand-icon mb-3" style="width:42px; height:42px; font-size:1.1rem;"><i class="fa-solid fa-play"></i></span>
+            <h2 class="fw-bold mb-2" id="authTitulo">Sign in to Streamrecorder</h2>
+            <p class="text-secondary small mb-0" id="authSubtitulo">
+              Welcome back! Log in to your account to manage your monitored streams and recordings.
+            </p>
+          </div>
+
+          <div id="alertaAuth" class="alert alert-danger py-2 small" style="display:none;"></div>
+
+          <div class="d-flex flex-column gap-2 mt-4">
+            <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('twitch')">
+              <i class="fa-brands fa-twitch" style="color:#9146ff;"></i> Continue with Twitch
+            </button>
+            <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('discord')">
+              <i class="fa-brands fa-discord" style="color:#5865F2;"></i> Continue with Discord
+            </button>
+            <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('google')">
+              <i class="fa-brands fa-google text-danger"></i> Continue with Google
+            </button>
+          </div>
+
+          <div class="divider-text">or</div>
+
+          <form onsubmit="procesarAuthReal(event)">
+            <div class="mb-3" id="campoUsernameReg" style="display:none;">
+              <input type="text" id="authUsername" class="auth-input" placeholder="Username">
+            </div>
+            <div class="mb-3">
+              <input type="email" id="authEmail" class="auth-input" placeholder="E-mail" required>
+            </div>
+            <div class="mb-3 position-relative">
+              <input type="password" id="authPass" class="auth-input" placeholder="Password" required minlength="6">
+              <i class="fa-regular fa-eye position-absolute text-secondary" style="right:18px; top:14px; cursor:pointer;" onclick="togglePassword()"></i>
+            </div>
+
+            <div class="d-flex gap-3 mt-4">
+              <button type="submit" class="btn-purple flex-grow-1 py-2" id="btnSubmitAuth">Login</button>
+              <button type="button" class="btn-outline-purple flex-grow-1 py-2" id="btnToggleAuth" onclick="alternarModoAuth()">Create New Account</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="auth-right"></div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       VISTA 2: PANEL PRINCIPAL (DASHBOARD, RECORDINGS, MONITORED)
+  ====================================================================== -->
+  <div id="vista-app" class="vista-seccion">
+    <header class="app-header">
+      <div class="d-flex align-items-center gap-4">
+        <a class="brand-logo" href="#" onclick="mostrarTab('tab-dashboard')">
+          <span class="brand-icon"><i class="fa-solid fa-play"></i></span>
+          <span class="d-none d-sm-inline">stream<span style="color:var(--accent-light)">recorder</span></span>
+        </a>
+        <div class="header-search d-none d-md-flex">
+          <i class="fa-brands fa-twitch" style="color:#9146ff;"></i>
+          <input type="text" id="inputNuevoStreamerTop" placeholder="Enter stream link or streamer name...">
+          <button class="btn btn-sm btn-purple py-1 px-3" onclick="agregarStreamerMonitoreado('inputNuevoStreamerTop')">Add</button>
+        </div>
+      </div>
+
+      <div class="d-flex align-items-center gap-3">
+        <div class="d-flex align-items-center gap-2">
+          <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold" style="width:34px; height:34px; background:var(--accent);" id="userInitial">U</div>
+          <span class="small fw-medium d-none d-lg-inline" id="userNameDisplay">User</span>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="cerrarSesionReal()">
+          <i class="fa-solid fa-arrow-right-from-bracket me-1"></i>Logout
+        </button>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="app-sidebar d-none d-md-block">
+        <a class="nav-item-side active" id="menu-dashboard" onclick="mostrarTab('tab-dashboard')">
+          <i class="fa-solid fa-gauge-high"></i> Dashboard
+        </a>
+        <a class="nav-item-side" id="menu-recordings" onclick="mostrarTab('tab-recordings')">
+          <i class="fa-solid fa-film"></i> Recordings
+        </a>
+        <a class="nav-item-side" id="menu-monitored" onclick="mostrarTab('tab-monitored')">
+          <i class="fa-solid fa-satellite-dish"></i> Monitored Streamers
+        </a>
+      </aside>
+
+      <main class="app-content">
+        <!-- 4 KPI Cards -->
+        <div class="row g-3 mb-4">
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Total Recordings</div>
+              <div class="kpi-value" id="kpiTotal">0</div>
+            </div>
+          </div>
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Recorder Status</div>
+              <div class="kpi-value text-success">Always On</div>
+            </div>
+          </div>
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Stream Quality</div>
+              <div class="kpi-value" style="color:var(--accent-light)">1080p60</div>
+            </div>
+          </div>
+          <div class="col-6 col-xl-3">
+            <div class="kpi-card">
+              <div class="kpi-title">Streamers Monitored</div>
+              <div class="kpi-value" id="kpiStreamers">0 / 5</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: DASHBOARD -->
+        <div id="tab-dashboard" class="sub-tab">
+          <div class="mb-5">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold m-0">Monitored Channels</h5>
+              <button class="btn-outline-purple btn-sm py-1 px-3" onclick="mostrarTab('tab-monitored')">Manage Channels</button>
+            </div>
+            <div class="row g-3" id="dashboardLiveBox"></div>
+          </div>
+
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold m-0">Latest Recordings</h5>
+              <button class="btn btn-sm text-secondary" onclick="mostrarTab('tab-recordings')">View All <i class="fa-solid fa-chevron-right ms-1"></i></button>
+            </div>
+            <div class="row g-4" id="dashboardLatestGrid"></div>
+          </div>
+        </div>
+
+        <!-- TAB: RECORDINGS -->
+        <div id="tab-recordings" class="sub-tab" style="display:none;">
+          <div class="filter-bar">
+            <div class="row g-3 align-items-end">
+              <div class="col-12 col-md-4">
+                <label class="small text-secondary mb-1">Search recordings</label>
+                <div class="header-search w-100">
+                  <i class="fa-solid fa-magnifying-glass text-secondary"></i>
+                  <input type="text" id="recSearchInput" placeholder="Filter by streamer, title or date..." oninput="renderizarSeccionRecordings()">
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="small text-secondary mb-1">Sort by</label>
+                <select id="recSortBy" class="form-select bg-dark border-secondary border-opacity-25 text-light rounded-pill form-select-sm py-2 px-3" onchange="renderizarSeccionRecordings()">
+                  <option value="recent">Most Recent</option>
+                  <option value="name">Streamer Name (A-Z)</option>
+                  <option value="count">Most Recordings</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="small text-secondary mb-1">Recording Sort</label>
+                <select id="recOrder" class="form-select bg-dark border-secondary border-opacity-25 text-light rounded-pill form-select-sm py-2 px-3" onchange="renderizarSeccionRecordings()">
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-2 text-md-end">
+                <label class="small text-secondary mb-1 d-block">View</label>
+                <div class="btn-group">
+                  <button type="button" id="btnViewGrid" class="btn btn-sm btn-outline-secondary px-3" onclick="cambiarModoVistaRec('grid')"><i class="fa-solid fa-grip"></i> Grid</button>
+                  <button type="button" id="btnViewList" class="btn btn-sm btn-purple px-3" onclick="cambiarModoVistaRec('list')"><i class="fa-solid fa-list"></i> List</button>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex gap-4 mt-3 pt-2 border-top border-secondary border-opacity-10 small">
+              <label class="d-flex align-items-center gap-2 text-light" style="cursor:pointer;">
+                <input type="checkbox" id="chkDownloadBtns" checked class="form-check-input m-0" onchange="renderizarSeccionRecordings()">
+                <i class="fa-solid fa-download text-primary"></i> Download Buttons
+              </label>
+              <span class="text-secondary ms-auto" id="textoContadorRec">0 recordings</span>
+            </div>
+          </div>
+          <div id="contenedorRecordingsVista"></div>
+        </div>
+
+        <!-- TAB: MONITORED STREAMERS -->
+        <div id="tab-monitored" class="sub-tab" style="display:none;">
+          <div class="kpi-card mb-4">
+            <h5 class="fw-bold mb-2">Add Streamer</h5>
+            <p class="text-secondary small mb-3">
+              Enter a Twitch username or channel link to start recording automatically when they go live.
+            </p>
+            <div class="d-flex gap-2" style="max-width:500px;">
+              <input type="text" id="inputNuevoStreamerTab" class="auth-input py-2" placeholder="e.g. illojuan">
+              <button class="btn-purple" onclick="agregarStreamerMonitoreado('inputNuevoStreamerTab')">Add</button>
+            </div>
+          </div>
+          <div class="row g-3" id="listaCanalesMonitoreados"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL REPRODUCTOR -->
+  <div class="modal fade" id="reproductorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+        <div class="modal-header border-secondary border-opacity-25">
+          <h6 class="modal-title fw-bold m-0" id="modalTitulo">Stream Playback</h6>
+          <div class="ms-auto me-3 btn-group btn-group-sm" id="selectorServidorGroup" style="display:none;">
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('drive')">Server 1</button>
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('archive')">Server 2</button>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0 bg-black">
+          <div class="ratio ratio-16x9" id="contenedorIframe"></div>
+        </div>
+        <div class="modal-footer border-secondary border-opacity-25 d-flex justify-content-between">
+          <span class="text-secondary small" id="modalMeta"></span>
+          <a href="#" id="modalBotonDrive" target="_blank" class="btn-purple btn-sm text-decoration-none">
+            <i class="fa-solid fa-download me-2"></i>Download MP4
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const SUPABASE_URL = "https://gdbhnosrfsayyevfdjde.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkYmhub3NyZnNheXlldmZkamRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwMjcwNTEsImV4cCI6MjEwNzYwMzA1MX0.zdapm_CZx_aYBrEy4bnjvogDFu7Jg0Cg0x4Cw7ZiLfY";
+    
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+
+    let videosGlobal = [];
+    let streamersMonitoreados = [];
+    let usuarioActual = null;
+    let vistaRecActual = 'list';
+    let modoAuthActual = 'login';
+    let videoModalActual = null;
+
+    async function inicializarApp() {
+      const { data: { session } } = await db.auth.getSession();
+      verificarAccesoObligatorio(session?.user || null);
+
+      db.auth.onAuthStateChange((_event, session) => {
+        verificarAccesoObligatorio(session?.user || null);
+      });
+    }
+
+    async function verificarAccesoObligatorio(user) {
+      usuarioActual = user;
+      if (!user) {
+        streamersMonitoreados = [];
+        videosGlobal = [];
+        cambiarVista('vista-auth');
+        return;
+      }
+
+      const nombre = user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.preferred_username || user.user_metadata?.username || (user.email ? user.email.split('@')[0] : 'User');
+      document.getElementById('userNameDisplay').innerText = nombre;
+      document.getElementById('userInitial').innerText = nombre.charAt(0).toUpperCase();
+      
+      cambiarVista('vista-app');
+      await cargarDatosPrivadosUsuario();
+    }
+
+    async function loginOAuthOIDC(proveedor) {
+      const alerta = document.getElementById('alertaAuth');
+      alerta.style.display = 'none';
+      
+      const opciones = {
+        redirectTo: window.location.origin + window.location.pathname
+      };
+
+      if (proveedor === 'twitch') {
+        opciones.scopes = 'user:read:email';
+      }
+
+      const { error } = await db.auth.signInWithOAuth({
+        provider: proveedor,
+        options: opciones
+      });
+      
+      if (error) {
+        alerta.innerText = error.message;
+        alerta.style.display = 'block';
+      }
+    }
+
+    async function cargarDatosPrivadosUsuario() {
+      if (!usuarioActual) return;
+      try {
+        const { data: stData, error: errSt } = await db
+          .from('streamers_monitoreados')
+          .select('*')
+          .eq('user_id', usuarioActual.id)
+          .order('created_at', { ascending: false });
+
+        streamersMonitoreados = (!errSt && stData) ? stData : [];
+
+        const misCanales = streamersMonitoreados.map(s => s.streamer.toLowerCase());
+        if (misCanales.length > 0) {
+          const { data: vidData, error: errVid } = await db
+            .from('grabaciones')
+            .select('*')
+            .in('streamer', misCanales)
+            .order('created_at', { ascending: false });
+          videosGlobal = (!errVid && vidData) ? vidData : [];
+        } else {
+          videosGlobal = [];
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      actualizarTodoUI();
+    }
+
+    async function agregarStreamerMonitoreado(idInput) {
+      if (!usuarioActual) return cambiarVista('vista-auth');
+
+      const inp = document.getElementById(idInput);
+      const canal = inp.value.trim().toLowerCase()
+        .replace('https://www.twitch.tv/', '')
+        .replace('https://twitch.tv/', '')
+        .replace('/', '');
+
+      const regexTwitch = /^[a-z0-9_]{2,25}$/;
+      if (!regexTwitch.test(canal)) {
+        return alert('Please enter a valid Twitch username.');
+      }
+
+      if (streamersMonitoreados.length >= 5) {
+        return alert('You have reached the maximum limit of 5 monitored streamers.');
+      }
+
+      const autor = usuarioActual.user_metadata?.username || usuarioActual.email || 'user';
+      const { error } = await db.from('streamers_monitoreados').insert([{
+        streamer: canal,
+        agregado_por: autor,
+        user_id: usuarioActual.id
+      }]);
+
+      if (error) {
+        alert(error.message.includes('unique') ? 'This channel is already in your monitored list.' : error.message);
+      } else {
+        inp.value = '';
+        await cargarDatosPrivadosUsuario();
+      }
+    }
+
+    async function eliminarStreamerMonitoreado(id) {
+      if (!confirm('Remove this channel from your monitored list?')) return;
+      await db.from('streamers_monitoreados').delete().eq('id', id).eq('user_id', usuarioActual.id);
+      await cargarDatosPrivadosUsuario();
+    }
+
+    async function procesarAuthReal(e) {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPass').value;
+      const username = document.getElementById('authUsername').value.trim();
+      const alerta = document.getElementById('alertaAuth');
+      alerta.className = 'alert alert-danger py-2 small';
+      alerta.style.display = 'none';
+
+      if (modoAuthActual === 'register') {
+        const { data, error } = await db.auth.signUp({
+          email,
+          password,
+          options: { data: { username: username || email.split('@')[0] } }
+        });
+        if (error) {
+          alerta.innerText = error.message;
+          alerta.style.display = 'block';
+        } else if (data?.user && !data?.session) {
+          alerta.className = 'alert alert-success py-2 small';
+          alerta.innerText = 'Account created! Please check your email to verify your account.';
+          alerta.style.display = 'block';
+        }
+      } else {
+        const { error } = await db.auth.signInWithPassword({ email, password });
+        if (error) {
+          alerta.innerText = 'Invalid email or password.';
+          alerta.style.display = 'block';
+        }
+      }
+    }
+
+    async function cerrarSesionReal() {
+      await db.auth.signOut();
+      verificarAccesoObligatorio(null);
+    }
+
+    function actualizarTodoUI() {
+      document.getElementById('kpiTotal').innerText = videosGlobal.length;
+      document.getElementById('kpiStreamers').innerText = `${streamersMonitoreados.length} / 5`;
+
+      if (streamersMonitoreados.length === 0) {
+        document.getElementById('dashboardLiveBox').innerHTML = `
+          <div class="col-12">
+            <div class="p-4 rounded-3 text-center border border-secondary border-opacity-25" style="background:var(--bg-card);">
+              <p class="text-secondary mb-2">No channels monitored yet.</p>
+              <button class="btn-purple btn-sm" onclick="mostrarTab('tab-monitored')">Add Channel</button>
+            </div>
+          </div>`;
+      } else {
+        document.getElementById('dashboardLiveBox').innerHTML = streamersMonitoreados.map(st => `
+          <div class="col-12 col-md-6 col-xl-4">
+            <div class="vod-card p-3 d-flex align-items-center justify-content-between" onclick="window.open('https://www.twitch.tv/${st.streamer}', '_blank')">
+              <div class="d-flex align-items-center gap-3">
+                <img src="${st.avatar}" class="streamer-avatar" style="width:48px; height:48px;">
+                <div>
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="fw-bold fs-6">${st.streamer}</span>
+                    <span class="badge bg-danger rounded-pill" style="font-size:0.65rem;">ALWAYS ON</span>
+                  </div>
+                  <div class="text-secondary small mt-1">Twitch Channel</div>
+                </div>
+              </div>
+              <i class="fa-solid fa-chevron-right text-secondary"></i>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      document.getElementById('dashboardLatestGrid').innerHTML = videosGlobal.length
+        ? videosGlobal.slice(0, 8).map((v, i) => crearTarjetaHTML(v, i, true)).join('')
+        : '<div class="col-12 text-secondary small">No recordings available yet.</div>';
+
+      document.getElementById('listaCanalesMonitoreados').innerHTML = streamersMonitoreados.map(st => {
+        const cant = videosGlobal.filter(x => x.streamer === st.streamer).length;
+        return `
+          <div class="col-12 col-md-6 col-lg-4">
+            <div class="p-3 rounded-3 border border-secondary border-opacity-25 d-flex justify-content-between align-items-center" style="background:var(--bg-card);">
+              <div class="d-flex align-items-center gap-3">
+                <img src="${st.avatar}" class="streamer-avatar">
+                <div>
+                  <span class="fw-bold">${st.streamer}</span>
+                  <div class="small text-secondary">${cant} recordings</div>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="eliminarStreamerMonitoreado(${st.id})">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      renderizarSeccionRecordings();
+    }
+
+    function crearTarjetaHTML(v, idx, mostrarDescarga) {
+      const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
+      return `
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+          <div class="vod-card" onclick="abrirModalVideo(${idx})">
+            <div class="vod-thumb">
+              <img src="${v.miniatura || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80'}" alt="${v.titulo}">
+              <span class="badge-twitch"><i class="fa-brands fa-twitch me-1"></i>Twitch</span>
+              <span class="badge-duration">${v.duracion || '01:00:00'}</span>
+            </div>
+            <div class="vod-info">
+              <div class="d-flex gap-2 align-items-start">
+                <img class="streamer-avatar" src="${v.avatar || 'https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png'}" alt="${v.streamer}">
+                <div class="flex-grow-1 overflow-hidden">
+                  <div class="vod-title">${v.titulo}</div>
+                  <div class="d-flex justify-content-between align-items-center mt-1">
+                    <span class="text-secondary" style="font-size:0.76rem;"><strong class="text-light">${v.streamer}</strong> • ${v.fecha}</span>
+                    ${mostrarDescarga ? `<a href="${linkDrive}" target="_blank" onclick="event.stopPropagation()" class="text-light"><i class="fa-solid fa-download"></i></a>` : ''}
+                  </div>
+                  <div class="d-flex gap-1 flex-wrap mt-2">
+                    <span class="badge-cat">${v.categoria || 'Just Chatting'}</span>
+                    <span class="badge-res">${v.calidad || '1080p60'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderizarSeccionRecordings() {
+      const q = (document.getElementById('recSearchInput')?.value || '').toLowerCase();
+      const sortBy = document.getElementById('recSortBy')?.value || 'recent';
+      const recOrder = document.getElementById('recOrder')?.value || 'newest';
+      const showDl = document.getElementById('chkDownloadBtns')?.checked ?? true;
+
+      let filtrados = videosGlobal.filter(v =>
+        v.streamer.toLowerCase().includes(q) ||
+        v.titulo.toLowerCase().includes(q) ||
+        v.fecha.toLowerCase().includes(q)
+      );
+
+      if (recOrder === 'oldest') filtrados.reverse();
+      document.getElementById('textoContadorRec').innerText = `${filtrados.length} recordings`;
+
+      const cont = document.getElementById('contenedorRecordingsVista');
+      if (filtrados.length === 0) {
+        cont.innerHTML = `<div class="text-center text-secondary py-5">No recordings found.</div>`;
+        return;
+      }
+
+      if (vistaRecActual === 'grid') {
+        cont.innerHTML = `<div class="row g-4">${filtrados.map(v => crearTarjetaHTML(v, videosGlobal.indexOf(v), showDl)).join('')}</div>`;
+      } else {
+        const grupos = {};
+        filtrados.forEach(v => {
+          if (!grupos[v.streamer]) grupos[v.streamer] = [];
+          grupos[v.streamer].push(v);
+        });
+        let nombres = Object.keys(grupos);
+        if (sortBy === 'name') nombres.sort();
+        if (sortBy === 'count') nombres.sort((a, b) => grupos[b].length - grupos[a].length);
+
+        cont.innerHTML = nombres.map((st, sIdx) => {
+          const vods = grupos[st];
+          const avatar = vods[0]?.avatar || 'https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png';
+          return `
+            <div class="streamer-accordion">
+              <div class="streamer-row" onclick="document.getElementById('drawer-${sIdx}').classList.toggle('abierto')">
+                <div class="d-flex align-items-center gap-3">
+                  <i class="fa-brands fa-twitch fs-5" style="color:#9146ff"></i>
+                  <img src="${avatar}" class="streamer-avatar">
+                  <span class="fw-bold fs-6">${st}</span>
+                  <span class="badge rounded-pill bg-primary px-2">${vods.length}</span>
+                </div>
+                <i class="fa-solid fa-chevron-down text-secondary"></i>
+              </div>
+              <div id="drawer-${sIdx}" class="streamer-drawer ${sIdx === 0 ? 'abierto' : ''}">
+                <div class="row g-4">${vods.map(v => crearTarjetaHTML(v, videosGlobal.indexOf(v), showDl)).join('')}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function cambiarModoVistaRec(modo) {
+      vistaRecActual = modo;
+      document.getElementById('btnViewGrid').className = modo === 'grid' ? 'btn btn-sm btn-purple px-3' : 'btn btn-sm btn-outline-secondary px-3';
+      document.getElementById('btnViewList').className = modo === 'list' ? 'btn btn-sm btn-purple px-3' : 'btn btn-sm btn-outline-secondary px-3';
+      renderizarSeccionRecordings();
+    }
+
+    function cambiarVista(id) {
+      document.querySelectorAll('.vista-seccion').forEach(el => el.classList.remove('activa'));
+      document.getElementById(id).classList.add('activa');
+      window.scrollTo(0, 0);
+    }
+
+    function mostrarTab(id) {
+      if (!usuarioActual) return cambiarVista('vista-auth');
+      document.querySelectorAll('.sub-tab').forEach(el => el.style.display = 'none');
+      document.getElementById(id).style.display = 'block';
+      document.querySelectorAll('.nav-item-side').forEach(el => el.classList.remove('active'));
+      if (id === 'tab-dashboard') document.getElementById('menu-dashboard').classList.add('active');
+      if (id === 'tab-recordings') document.getElementById('menu-recordings').classList.add('active');
+      if (id === 'tab-monitored') document.getElementById('menu-monitored').classList.add('active');
+    }
+
+    function modoAuth(modo) {
+      modoAuthActual = modo;
+      const esReg = modo === 'register';
+      document.getElementById('authTitulo').innerText = esReg ? 'Sign up to Streamrecorder' : 'Sign in to Streamrecorder';
+      document.getElementById('authSubtitulo').innerText = esReg
+        ? 'Create an account for free and enjoy full access to our features.'
+        : 'Welcome back! Log in to your account to manage your monitored streams and recordings.';
+      document.getElementById('campoUsernameReg').style.display = esReg ? 'block' : 'none';
+      document.getElementById('btnSubmitAuth').innerText = esReg ? 'Create Account' : 'Login';
+      document.getElementById('btnToggleAuth').innerText = esReg ? 'Login' : 'Create New Account';
+    }
+
+    function alternarModoAuth() { modoAuth(modoAuthActual === 'login' ? 'register' : 'login'); }
+    function togglePassword() {
+      const inp = document.getElementById('authPass');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    function abrirModalVideo(idx) {
+      const v = videosGlobal[idx];
+      if (!v) return;
+      videoModalActual = v;
+      document.getElementById('modalTitulo').innerText = v.titulo;
+      document.getElementById('modalMeta').innerText = `${v.streamer} • ${v.fecha}`;
+      
+      const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
+      document.getElementById('modalBotonDrive').href = linkDrive;
+
+      const tieneAmbos = v.drive_id && v.url_permanente && v.url_permanente.startsWith('http');
+      document.getElementById('selectorServidorGroup').style.display = tieneAmbos ? 'inline-flex' : 'none';
+
+      if (v.drive_id) {
+        cambiarServidorReproductor('drive');
+      } else if (v.url_permanente) {
+        cambiarServidorReproductor('archive');
+      }
+      new bootstrap.Modal(document.getElementById('reproductorModal')).show();
+    }
+
+    function cambiarServidorReproductor(servidor) {
+      const v = videoModalActual;
+      if (!v) return;
+      const iframeCont = document.getElementById('contenedorIframe');
+      if (servidor === 'drive' && v.drive_id) {
+        iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+      } else if (v.url_permanente) {
+        iframeCont.innerHTML = `<video controls autoplay style="width:100%; height:100%; background:#000;"><source src="${v.url_permanente}" type="video/mp4"></video>`;
+      }
+    }
+
+    document.getElementById('reproductorModal').addEventListener('hidden.bs.modal', () => {
+      document.getElementById('contenedorIframe').innerHTML = '';
+    });
+
+    inicializarApp();
+  </script>
+</body>
+</html>
