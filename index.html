@@ -1242,6 +1242,7 @@
     }
 
     // Reproductor DVR estilo Kick: Reproduce tu propia grabación HLS en vivo con barra para retroceder sin silencios de Twitch
+// Reproductor DVR estilo Kick con anti-caché en cada actualización del manifiesto
     function iniciarReproductorKickDVR(m3u8Url) {
       const iframeCont = document.getElementById('contenedorIframe');
       iframeCont.innerHTML = `
@@ -1254,29 +1255,52 @@
       const video = document.getElementById('kickDvrVideo');
       const msg = document.getElementById('dvrBufferingMsg');
 
+      // Limpiar cualquier parámetro previo de la URL base
+      const cleanM3u8Url = m3u8Url.split('?')[0];
+
       function cargarFlujoHLS() {
-        const urlConCacheBust = `${m3u8Url}?t=${Date.now()}`;
         if (window.Hls && Hls.isSupported()) {
           if (hlsInstance) hlsInstance.destroy();
+          
           hlsInstance = new Hls({
-            liveSyncDurationCount: 3,
-            enableWorker: true
+            liveSyncDurationCount: 2,
+            liveMaxLatencyDurationCount: 5,
+            enableWorker: true,
+            manifestLoadingTimeOut: 15000,
+            // Fuerza a que cada recarga periódica del .m3u8 ignore la caché de GitHub
+            xhrSetup: function(xhr, url) {
+              if (url.includes('.m3u8')) {
+                const sep = url.includes('?') ? '&' : '?';
+                xhr.open('GET', `${url}${sep}_cb=${Date.now()}`, true);
+              }
+            }
           });
-          hlsInstance.loadSource(urlConCacheBust);
+
+          hlsInstance.loadSource(cleanM3u8Url);
           hlsInstance.attachMedia(video);
+
           hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
             msg.style.display = 'none';
             video.play().catch(() => {});
           });
+
           hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
             if (data.fatal) {
-              // Si el directo acaba de empezar hace < 15 segundos y el primer segmento aún se está subiendo, reintenta solo
-              msg.style.display = 'block';
-              setTimeout(cargarFlujoHLS, 5000);
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                msg.style.display = 'block';
+                setTimeout(() => {
+                  if (hlsInstance) hlsInstance.startLoad();
+                  else cargarFlujoHLS();
+                }, 4000);
+              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                hlsInstance.recoverMediaError();
+              } else {
+                setTimeout(cargarFlujoHLS, 4000);
+              }
             }
           });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = urlConCacheBust;
+          video.src = `${cleanM3u8Url}?_cb=${Date.now()}`;
           video.addEventListener('loadedmetadata', () => {
             msg.style.display = 'none';
             video.play().catch(() => {});
@@ -1287,10 +1311,46 @@
       cargarFlujoHLS();
     }
 
-    function saltarAlVivoDVR() {
+    // Fuerza la recarga del manifiesto más reciente y salta al último segundo disponible en vivo
+    async function saltarAlVivoDVR() {
       const video = document.getElementById('kickDvrVideo');
-      if (video && video.duration) {
-        video.currentTime = Math.max(0, video.duration - 3);
+      const v = videoModalActual;
+      if (!video || !v) return;
+
+      const tiempoPrevio = video.currentTime;
+
+      if (hlsInstance) {
+        // Si GitHub Raw tiene cacheado el manifiesto, consultamos el último commit de la rama live-dvr vía API
+        try {
+          const match = v.url_directa.match(/raw\.githubusercontent\.com\/([^/]+\/[^/]+)\/live-dvr\/(.+)$/);
+          if (match) {
+            const repo = match[1];
+            const path = match[2].split('?')[0];
+            const carpetaDvr = path.substring(0, path.lastIndexOf('/'));
+            const commitResp = await fetch(`https://api.github.com/repos/${repo}/commits/live-dvr?t=${Date.now()}`);
+            if (commitResp.ok) {
+              const commitData = await commitResp.json();
+              const sha = commitData.sha;
+              // Usar el SHA exacto del último commit rompe el 100% de la caché de GitHub CDN al instante
+              const freshUrl = `https://raw.githubusercontent.com/${repo}/${sha}/${carpetaDvr}/index.m3u8`;
+              
+              hlsInstance.loadSource(freshUrl);
+              hlsInstance.once(Hls.Events.MANIFEST_PARSED, () => {
+                setTimeout(() => {
+                  const target = hlsInstance.liveSyncPosition || (video.duration ? video.duration - 2 : tiempoPrevio);
+                  video.currentTime = Math.max(0, target);
+                  video.play().catch(() => {});
+                }, 150);
+              });
+              return;
+            }
+          }
+        } catch (e) {}
+
+        // Respaldo estándar si no requiere cambio de SHA
+        hlsInstance.startLoad();
+        const pos = hlsInstance.liveSyncPosition || (video.duration ? video.duration - 2 : 0);
+        if (pos > 0) video.currentTime = pos;
         video.play().catch(() => {});
       }
     }
