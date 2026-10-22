@@ -1,1425 +1,709 @@
-
 <!DOCTYPE html>
-
 <html lang="es" data-bs-theme="dark">
-
 <head>
-
   <meta charset="UTF-8">
-
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <title>StreamRecorder</title>
-
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-
     :root {
-
       --bg-dark: #0b0c14;
-
       --bg-sidebar: #0f101a;
-
       --bg-card: #151726;
-
       --bg-card-hover: #1c1f33;
-
       --bg-input: #17192b;
-
       --accent: #6c5ce7;
-
       --accent-light: #a29bfe;
-
       --text-muted: #8b90b2;
-
       --border-color: rgba(255, 255, 255, 0.06);
-
     }
-
     body {
-
       font-family: 'Lexend', sans-serif;
-
       background-color: var(--bg-dark);
-
       color: #fff;
-
       margin: 0;
-
       overflow-x: hidden;
-
       -webkit-font-smoothing: antialiased;
-
     }
-
     .vista-seccion { display: none; min-height: 100vh; }
-
     .vista-seccion.activa { display: block; }
 
-
-
     /* Botones */
-
     .btn-purple {
-
       background: linear-gradient(135deg, #6c5ce7, #8e44ad);
-
       border: none;
-
       color: #fff;
-
       border-radius: 50px;
-
       padding: 0.6rem 1.4rem;
-
       font-weight: 500;
-
       font-size: 0.9rem;
-
       transition: all 0.2s ease;
-
     }
-
     .btn-purple:hover { opacity: 0.92; transform: translateY(-1px); color: #fff; }
-
     .btn-outline-purple {
-
       background: transparent;
-
       border: 1.5px solid var(--accent);
-
       color: #fff;
-
       border-radius: 50px;
-
       padding: 0.6rem 1.4rem;
-
       font-weight: 500;
-
       font-size: 0.9rem;
-
       transition: all 0.2s ease;
-
     }
-
     .btn-outline-purple:hover { background: rgba(108, 92, 231, 0.14); color: #fff; }
 
-
-
     /* Auth Layout */
-
     .auth-wrapper { display: flex; min-height: 100vh; }
-
     .auth-left {
-
       flex: 1;
-
       max-width: 540px;
-
       padding: 3rem 3.5rem;
-
       display: flex;
-
       flex-direction: column;
-
       justify-content: center;
-
       background: var(--bg-dark);
-
     }
-
     @media (max-width: 576px) { .auth-left { padding: 2rem 1.5rem; } }
-
     .auth-right {
-
       flex: 1;
-
       background: linear-gradient(135deg, rgba(11, 12, 20, 0.72), rgba(108, 92, 231, 0.22)),
-
                   url('https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1600&q=80') center/cover;
-
       display: none;
-
     }
-
     @media (min-width: 992px) { .auth-right { display: block; } }
 
-
-
     .brand-logo {
-
       font-weight: 700;
-
       font-size: 1.25rem;
-
       color: #fff;
-
       text-decoration: none;
-
       display: inline-flex;
-
       align-items: center;
-
       gap: 10px;
-
     }
-
     .brand-icon {
-
       width: 32px;
-
       height: 32px;
-
       border-radius: 8px;
-
       background: linear-gradient(135deg, #6c5ce7, #e84393);
-
       display: inline-flex;
-
       align-items: center;
-
       justify-content: center;
-
       color: #fff;
-
       font-size: 0.85rem;
-
     }
-
     .auth-input {
-
       background: var(--bg-input);
-
       border: 1px solid var(--border-color);
-
       color: #fff;
-
       border-radius: 50px;
-
       padding: 0.78rem 1.3rem;
-
       width: 100%;
-
       font-size: 0.9rem;
-
       outline: none;
-
       transition: border-color 0.2s;
-
     }
-
     .auth-input:focus { border-color: var(--accent); }
-
     .oauth-btn {
-
       background: var(--bg-card);
-
       border: 1px solid var(--border-color);
-
       color: #fff;
-
       border-radius: 50px;
-
       padding: 0.68rem;
-
       width: 100%;
-
       font-size: 0.88rem;
-
       display: flex;
-
       align-items: center;
-
       justify-content: center;
-
       gap: 10px;
-
       transition: all 0.2s;
-
       font-weight: 500;
-
     }
-
     .oauth-btn:hover { background: var(--bg-card-hover); border-color: rgba(255,255,255,0.18); }
-
     .divider-text {
-
       display: flex;
-
       align-items: center;
-
       text-align: center;
-
       color: var(--text-muted);
-
       font-size: 0.8rem;
-
       margin: 1.4rem 0;
-
     }
-
     .divider-text::before, .divider-text::after {
-
       content: '';
-
       flex: 1;
-
       border-bottom: 1px solid var(--border-color);
-
     }
-
     .divider-text:not(:empty)::before { margin-right: .85em; }
-
     .divider-text:not(:empty)::after { margin-left: .85em; }
 
-
-
     /* App Header & Sidebar Layout */
-
     .app-header {
-
       height: 68px;
-
       background: var(--bg-sidebar);
-
       border-bottom: 1px solid var(--border-color);
-
       display: flex;
-
       align-items: center;
-
       justify-content: space-between;
-
       padding: 0 1.75rem;
-
       position: sticky;
-
       top: 0;
-
       z-index: 100;
-
     }
-
     .header-search {
-
       background: var(--bg-input);
-
       border: 1px solid var(--border-color);
-
       border-radius: 8px;
-
       padding: 0.4rem 0.6rem 0.4rem 1rem;
-
       width: 420px;
-
       display: flex;
-
       align-items: center;
-
       gap: 10px;
-
       transition: border-color 0.2s;
-
     }
-
     .header-search:focus-within { border-color: var(--accent); }
-
     .header-search input {
-
       background: transparent;
-
       border: none;
-
       color: #fff;
-
       width: 100%;
-
       outline: none;
-
       font-size: 0.85rem;
-
     }
-
     .app-body { display: flex; min-height: calc(100vh - 68px); }
-
     .app-sidebar {
-
       width: 245px;
-
       background: var(--bg-sidebar);
-
       border-right: 1px solid var(--border-color);
-
       padding: 1.5rem 0.9rem;
-
       flex-shrink: 0;
-
       display: flex;
-
       flex-direction: column;
-
       justify-content: space-between;
-
     }
-
     .nav-item-side {
-
       display: flex;
-
       align-items: center;
-
       gap: 12px;
-
       padding: 0.72rem 1rem;
-
       color: var(--text-muted);
-
       text-decoration: none;
-
       border-radius: 8px;
-
       font-size: 0.78rem;
-
       font-weight: 600;
-
       text-transform: uppercase;
-
       letter-spacing: 0.5px;
-
       margin-bottom: 5px;
-
       cursor: pointer;
-
       transition: all 0.2s;
-
     }
-
     .nav-item-side:hover, .nav-item-side.active {
-
       background: #1c1f30;
-
       color: #fff;
-
     }
-
     .sidebar-user-box {
-
       background: var(--bg-card);
-
       border: 1px solid var(--border-color);
-
       border-radius: 10px;
-
       padding: 0.65rem 0.85rem;
-
       display: flex;
-
       align-items: center;
-
       justify-content: space-between;
-
       margin-bottom: 1rem;
-
     }
-
     .app-content { flex: 1; padding: 2rem; max-width: 1600px; }
 
-
-
     /* KPI Cards */
-
     .kpi-card {
-
       background: var(--bg-card);
-
       border: 1px solid var(--border-color);
-
       border-radius: 12px;
-
       padding: 1.25rem 1.4rem;
-
     }
-
     .kpi-title {
-
       font-size: 0.72rem;
-
       font-weight: 700;
-
       text-transform: uppercase;
-
       color: var(--text-muted);
-
       letter-spacing: 0.5px;
-
     }
-
     .kpi-value {
-
       font-size: 1.75rem;
-
       font-weight: 700;
-
       margin-top: 4px;
-
     }
 
-
-
-    /* Advanced Search Input Box (Igual a la captura) */
-
+    /* Advanced Search Input Box */
     .adv-search-box {
-
       background: #111320;
-
       border: 1.5px solid rgba(108, 92, 231, 0.55);
-
       border-radius: 10px;
-
       padding: 0.85rem 1.25rem;
-
       display: flex;
-
       align-items: center;
-
       justify-content: space-between;
-
       transition: border-color 0.2s, box-shadow 0.2s;
-
     }
-
     .adv-search-box:focus-within {
-
       border-color: var(--accent-light);
-
       box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
-
     }
-
     .adv-search-box input {
-
       background: transparent;
-
       border: none;
-
       color: #fff;
-
       width: 100%;
-
       outline: none;
-
       font-size: 0.95rem;
-
     }
-
     .adv-filter-btn {
-
       background: transparent;
-
       border: none;
-
       color: var(--text-muted);
-
       font-size: 1rem;
-
       padding: 0 0.4rem;
-
       cursor: pointer;
-
       transition: color 0.2s;
-
     }
-
     .adv-filter-btn:hover, .adv-filter-btn.activo { color: #fff; }
 
-
-
-    /* Skeleton Loaders (Tarjetas de carga como en la captura) */
-
+    /* Skeleton Loaders */
     @keyframes pulseSkeleton {
-
       0%, 100% { opacity: 0.55; }
-
       50% { opacity: 0.25; }
-
     }
-
     .skeleton-card {
-
       background: #121421;
-
       border: 1px solid var(--border-color);
-
       border-radius: 12px;
-
       padding: 12px;
-
       height: 100%;
-
     }
-
     .skeleton-thumb {
-
       width: 100%;
-
       aspect-ratio: 16/9;
-
       background: #25283d;
-
       border-radius: 8px;
-
       animation: pulseSkeleton 1.6s infinite ease-in-out;
-
     }
-
     .skeleton-avatar {
-
       width: 36px;
-
       height: 36px;
-
       border-radius: 50%;
-
       background: #25283d;
-
       flex-shrink: 0;
-
       animation: pulseSkeleton 1.6s infinite ease-in-out;
-
     }
-
     .skeleton-line {
-
       height: 10px;
-
       background: #25283d;
-
       border-radius: 4px;
-
       margin-bottom: 8px;
-
       animation: pulseSkeleton 1.6s infinite ease-in-out;
-
     }
-
-
 
     /* VOD Cards */
-
     .vod-card {
-
       background: var(--bg-card);
-
       border: 1px solid var(--border-color);
-
       border-radius: 12px;
-
       overflow: hidden;
-
       transition: all 0.22s ease;
-
       cursor: pointer;
-
       height: 100%;
-
     }
-
     .vod-card:hover {
-
       transform: translateY(-4px);
-
       background: var(--bg-card-hover);
-
       border-color: rgba(108, 92, 231, 0.5);
-
     }
-
     .vod-thumb {
-
       position: relative;
-
       aspect-ratio: 16/9;
-
       background: #000;
-
       overflow: hidden;
-
     }
-
     .vod-thumb img { width: 100%; height: 100%; object-fit: cover; }
-
     .badge-twitch {
-
       position: absolute;
-
       top: 8px;
-
       left: 8px;
-
       background: #9146ff;
-
       color: #fff;
-
       font-size: 0.7rem;
-
       padding: 3px 8px;
-
       border-radius: 5px;
-
       font-weight: 600;
-
     }
-
     .badge-duration {
-
       position: absolute;
-
       bottom: 8px;
-
       left: 8px;
-
       background: rgba(0,0,0,0.85);
-
       color: #fff;
-
       font-size: 0.74rem;
-
       padding: 2px 7px;
-
       border-radius: 4px;
-
       font-weight: 600;
-
     }
-
     .vod-info { padding: 0.95rem; }
-
     .streamer-avatar {
-
       width: 38px;
-
       height: 38px;
-
       border-radius: 50%;
-
       object-fit: cover;
-
       border: 2px solid var(--accent);
-
       flex-shrink: 0;
-
     }
-
     .vod-title {
-
       font-size: 0.88rem;
-
       font-weight: 600;
-
       line-height: 1.35;
-
       display: -webkit-box;
-
       -webkit-line-clamp: 2;
-
       -webkit-box-orient: vertical;
-
       overflow: hidden;
-
     }
-
     .badge-cat {
-
       background: rgba(46,204,113,0.14);
-
       color: #2ecc71;
-
       border: 1px solid rgba(46,204,113,0.28);
-
       font-size: 0.68rem;
-
       padding: 2px 9px;
-
       border-radius: 50px;
-
     }
-
     .badge-res {
-
       background: rgba(231,76,60,0.16);
-
       color: #ff7675;
-
       border: 1px solid rgba(231,76,60,0.32);
-
       font-size: 0.68rem;
-
       padding: 2px 9px;
-
       border-radius: 50px;
-
     }
-
-
 
     /* Recordings Filters & Accordion */
-
     .filter-bar {
-
       background: var(--bg-card);
-
       border: 1px solid var(--border-color);
-
       border-radius: 12px;
-
       padding: 1.25rem;
-
       margin-bottom: 1.5rem;
-
     }
-
     .streamer-accordion {
-
       background: var(--bg-card);
-
       border: 1px solid var(--border-color);
-
       border-radius: 10px;
-
       margin-bottom: 0.8rem;
-
       overflow: hidden;
-
     }
-
     .streamer-row {
-
       padding: 0.95rem 1.25rem;
-
       display: flex;
-
       align-items: center;
-
       justify-content: space-between;
-
       cursor: pointer;
-
       transition: background 0.2s;
-
     }
-
     .streamer-row:hover { background: var(--bg-card-hover); }
-
     .streamer-drawer {
-
       display: none;
-
       padding: 1.25rem;
-
       border-top: 1px solid var(--border-color);
-
       background: rgba(11,12,20,0.45);
-
     }
-
     .streamer-drawer.abierto { display: block; }
-
   </style>
-
 </head>
-
 <body>
 
-
-
   <!-- =====================================================================
-
        VISTA 1: LOGIN Y REGISTRO
-
   ====================================================================== -->
-
   <div id="vista-auth" class="vista-seccion activa">
-
     <div class="auth-wrapper">
-
       <div class="auth-left">
-
         <div>
-
           <div class="mb-4">
-
             <span class="brand-icon mb-3" style="width:40px; height:40px; font-size:1.05rem;"><i class="fa-solid fa-record-vinyl"></i></span>
-
             <h2 class="fw-bold mb-2" id="authTitulo">Sign in to Streamrecorder</h2>
-
             <p class="text-secondary small mb-0" id="authSubtitulo">
-
               Welcome back! Log in to your account to manage your monitored streams and recordings.
-
             </p>
-
           </div>
-
-
 
           <div id="alertaAuth" class="alert alert-danger py-2 small" style="display:none;"></div>
 
-
-
           <div class="d-flex flex-column gap-2 mt-4">
-
             <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('twitch')">
-
               <i class="fa-brands fa-twitch" style="color:#9146ff;"></i> Continue with Twitch
-
             </button>
-
             <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('discord')">
-
               <i class="fa-brands fa-discord" style="color:#5865F2;"></i> Continue with Discord
-
             </button>
-
             <button type="button" class="oauth-btn" onclick="loginOAuthOIDC('google')">
-
               <i class="fa-brands fa-google text-danger"></i> Continue with Google
-
             </button>
-
           </div>
-
-
 
           <div class="divider-text">or</div>
 
-
-
           <form onsubmit="procesarAuthReal(event)">
-
             <div class="mb-3" id="campoUsernameReg" style="display:none;">
-
               <input type="text" id="authUsername" class="auth-input" placeholder="Username">
-
             </div>
-
             <div class="mb-3">
-
               <input type="email" id="authEmail" class="auth-input" placeholder="E-mail" required>
-
             </div>
-
             <div class="mb-3 position-relative">
-
               <input type="password" id="authPass" class="auth-input" placeholder="Password" required minlength="6">
-
               <i class="fa-regular fa-eye position-absolute text-secondary" style="right:18px; top:14px; cursor:pointer;" onclick="togglePassword()"></i>
-
             </div>
-
-
 
             <div class="d-flex gap-3 mt-4">
-
               <button type="submit" class="btn-purple flex-grow-1 py-2" id="btnSubmitAuth">Login</button>
-
               <button type="button" class="btn-outline-purple flex-grow-1 py-2" id="btnToggleAuth" onclick="alternarModoAuth()">Create New Account</button>
-
             </div>
-
           </form>
-
         </div>
-
       </div>
-
       <div class="auth-right"></div>
-
     </div>
-
   </div>
-
-
 
   <!-- =====================================================================
-
        VISTA 2: APLICACIÓN PRINCIPAL
-
   ====================================================================== -->
-
   <div id="vista-app" class="vista-seccion">
-
     <header class="app-header">
-
       <div class="d-flex align-items-center gap-4">
-
         <a class="brand-logo" href="#" onclick="mostrarTab('tab-dashboard')">
-
           <span class="brand-icon"><i class="fa-solid fa-record-vinyl"></i></span>
-
           <span class="d-none d-sm-inline">streamrecorder</span>
-
         </a>
-
         <div class="header-search d-none d-md-flex">
-
           <input type="text" id="inputNuevoStreamerTop" placeholder="Enter stream link or name" onkeydown="if(event.key==='Enter') agregarStreamerMonitoreado('inputNuevoStreamerTop')">
-
           <button class="btn btn-sm btn-purple py-1 px-3" onclick="agregarStreamerMonitoreado('inputNuevoStreamerTop')">Add</button>
-
         </div>
-
       </div>
-
-
 
       <div class="d-flex align-items-center gap-2 d-md-none">
-
         <button class="btn btn-sm btn-outline-secondary" onclick="mostrarTab('tab-dashboard')"><i class="fa-solid fa-gauge-high"></i></button>
-
         <button class="btn btn-sm btn-outline-secondary" onclick="mostrarTab('tab-recordings')"><i class="fa-solid fa-film"></i></button>
-
         <button class="btn btn-sm btn-outline-secondary" onclick="mostrarTab('tab-advanced')"><i class="fa-solid fa-magnifying-glass"></i></button>
-
         <button class="btn btn-sm btn-outline-danger" onclick="cerrarSesionReal()"><i class="fa-solid fa-power-off"></i></button>
-
       </div>
-
     </header>
 
-
-
     <div class="app-body">
-
-      <!-- Sidebar Izquierdo Estilo Original -->
-
       <aside class="app-sidebar d-none d-md-flex">
-
         <div>
-
           <a class="nav-item-side active" id="menu-dashboard" onclick="mostrarTab('tab-dashboard')">
-
             Dashboard
-
           </a>
-
           <a class="nav-item-side" id="menu-recordings" onclick="mostrarTab('tab-recordings')">
-
             Recordings
-
           </a>
-
           <a class="nav-item-side" id="menu-advanced" onclick="mostrarTab('tab-advanced')">
-
             Advanced Search
-
           </a>
-
           <a class="nav-item-side" id="menu-monitored" onclick="mostrarTab('tab-monitored')">
-
             Monitored Streamers
-
           </a>
-
         </div>
-
-
 
         <div class="pt-3 border-top border-secondary border-opacity-10">
-
           <div class="sidebar-user-box">
-
             <div class="d-flex align-items-center gap-2 overflow-hidden">
-
               <div class="rounded-circle bg-light text-dark d-flex align-items-center justify-content-center fw-bold flex-shrink-0" style="width:28px; height:28px; font-size:0.8rem;" id="userInitial">U</div>
-
               <span class="small fw-medium text-truncate" id="userNameDisplay">User</span>
-
             </div>
-
             <button class="btn btn-sm text-secondary p-0 border-0" title="Logout" onclick="cerrarSesionReal()">
-
               <i class="fa-solid fa-right-from-bracket"></i>
-
             </button>
-
           </div>
-
           <div class="text-center text-secondary" style="font-size: 0.7rem;">
-
             <div class="fw-semibold text-light mb-1"><i class="fa-solid fa-record-vinyl me-1" style="color:var(--accent-light)"></i>StreamRecorder</div>
-
             <div>ALL RIGHTS RESERVED © 2026</div>
-
             <div id="sidebarClock" class="mt-1"></div>
-
           </div>
-
         </div>
-
       </aside>
 
-
-
       <main class="app-content">
-
         <!-- TAB 1: DASHBOARD -->
-
         <div id="tab-dashboard" class="sub-tab">
-
           <div class="row g-3 mb-4">
-
             <div class="col-6 col-xl-3">
-
               <div class="kpi-card">
-
                 <div class="kpi-title">Total Recordings</div>
-
                 <div class="kpi-value" id="kpiTotal">0</div>
-
               </div>
-
             </div>
-
             <div class="col-6 col-xl-3">
-
               <div class="kpi-card">
-
                 <div class="kpi-title">Recorder Status</div>
-
                 <div class="kpi-value text-success">Always On</div>
-
               </div>
-
             </div>
-
             <div class="col-6 col-xl-3">
-
               <div class="kpi-card">
-
                 <div class="kpi-title">Stream Quality</div>
-
                 <div class="kpi-value" style="color:var(--accent-light)">1080p60</div>
-
               </div>
-
             </div>
-
             <div class="col-6 col-xl-3">
-
               <div class="kpi-card">
-
                 <div class="kpi-title">Streamers Monitored</div>
-
                 <div class="kpi-value" id="kpiStreamers">0 / 5</div>
-
               </div>
-
             </div>
-
           </div>
-
-
 
           <div class="mb-5">
-
             <div class="d-flex justify-content-between align-items-center mb-3">
-
               <h5 class="fw-bold m-0">Monitored Channels</h5>
-
               <button class="btn-outline-purple btn-sm py-1 px-3" onclick="mostrarTab('tab-monitored')">Manage Channels</button>
-
             </div>
-
             <div class="row g-3" id="dashboardLiveBox"></div>
-
           </div>
-
-
 
           <div>
-
             <div class="d-flex justify-content-between align-items-center mb-3">
-
               <h5 class="fw-bold m-0">Latest Recordings</h5>
-
               <button class="btn btn-sm text-secondary" onclick="mostrarTab('tab-recordings')">View All <i class="fa-solid fa-chevron-right ms-1"></i></button>
-
             </div>
-
             <div class="row g-4" id="dashboardLatestGrid"></div>
-
           </div>
-
         </div>
 
-
-
-        <!-- TAB 2: RECORDINGS (PRIVADAS DEL USUARIO) -->
-
+        <!-- TAB 2: RECORDINGS -->
         <div id="tab-recordings" class="sub-tab" style="display:none;">
-
           <div class="filter-bar">
-
             <div class="row g-3 align-items-end">
-
               <div class="col-12 col-md-4">
-
                 <label class="small text-secondary mb-1">Search recordings</label>
-
                 <div class="header-search w-100">
-
                   <i class="fa-solid fa-magnifying-glass text-secondary"></i>
-
                   <input type="text" id="recSearchInput" placeholder="Filter by streamer, title or date..." oninput="renderizarSeccionRecordings()">
-
                 </div>
-
               </div>
-
               <div class="col-6 col-md-3">
-
                 <label class="small text-secondary mb-1">Sort by</label>
-
                 <select id="recSortBy" class="form-select bg-dark border-secondary border-opacity-25 text-light rounded-pill form-select-sm py-2 px-3" onchange="renderizarSeccionRecordings()">
-
                   <option value="recent">Most Recent</option>
-
                   <option value="name">Streamer Name (A-Z)</option>
-
                   <option value="count">Most Recordings</option>
-
                 </select>
-
               </div>
-
               <div class="col-6 col-md-3">
-
                 <label class="small text-secondary mb-1">Recording Sort</label>
-
                 <select id="recOrder" class="form-select bg-dark border-secondary border-opacity-25 text-light rounded-pill form-select-sm py-2 px-3" onchange="renderizarSeccionRecordings()">
-
                   <option value="newest">Newest First</option>
-
                   <option value="oldest">Oldest First</option>
-
                 </select>
-
               </div>
-
               <div class="col-12 col-md-2 text-md-end">
-
                 <label class="small text-secondary mb-1 d-block">View</label>
-
                 <div class="btn-group">
-
                   <button type="button" id="btnViewGrid" class="btn btn-sm btn-outline-secondary px-3" onclick="cambiarModoVistaRec('grid')"><i class="fa-solid fa-grip"></i> Grid</button>
-
                   <button type="button" id="btnViewList" class="btn btn-sm btn-purple px-3" onclick="cambiarModoVistaRec('list')"><i class="fa-solid fa-list"></i> List</button>
-
                 </div>
-
               </div>
-
             </div>
-
             <div class="d-flex gap-4 mt-3 pt-2 border-top border-secondary border-opacity-10 small">
-
               <label class="d-flex align-items-center gap-2 text-light" style="cursor:pointer;">
-
                 <input type="checkbox" id="chkDownloadBtns" checked class="form-check-input m-0" onchange="renderizarSeccionRecordings()">
-
                 <i class="fa-solid fa-download text-primary"></i> Download Buttons
-
               </label>
-
               <span class="text-secondary ms-auto" id="textoContadorRec">0 recordings</span>
-
             </div>
-
           </div>
-
           <div id="contenedorRecordingsVista"></div>
-
         </div>
 
-
-
-        <!-- =====================================================================
-
-             TAB 3: ADVANCED SEARCH (BÚSQUEDA GLOBAL DE VODS DE TODOS LOS USUARIOS)
-
-        ====================================================================== -->
-
+        <!-- TAB 3: ADVANCED SEARCH -->
         <div id="tab-advanced" class="sub-tab" style="display:none;">
-
           <div class="adv-search-box mb-3">
-
             <input type="text" id="advSearchInput" placeholder="Search streamers..." oninput="dispararBusquedaAvanzada()">
-
             <button type="button" class="adv-filter-btn" title="Filters" onclick="document.getElementById('advExtraFilters').classList.toggle('d-none')">
-
               <i class="fa-solid fa-filter"></i>
-
             </button>
-
           </div>
-
-
-
-          <!-- Filtros desplegables opcionales al tocar el icono de embudo -->
 
           <div id="advExtraFilters" class="filter-bar d-none mb-4">
-
             <div class="row g-3">
-
               <div class="col-12 col-md-4">
-
                 <label class="small text-secondary mb-1">Category / Game</label>
-
                 <input type="text" id="advCategoryInput" class="form-control form-control-sm bg-dark border-secondary border-opacity-25 text-light rounded-pill px-3" placeholder="e.g. Just Chatting, Valorant..." oninput="dispararBusquedaAvanzada()">
-
               </div>
-
               <div class="col-6 col-md-4">
-
                 <label class="small text-secondary mb-1">Sort Order</label>
-
                 <select id="advSortOrder" class="form-select form-select-sm bg-dark border-secondary border-opacity-25 text-light rounded-pill px-3" onchange="dispararBusquedaAvanzada()">
-
                   <option value="newest">Newest First</option>
-
                   <option value="oldest">Oldest First</option>
-
                 </select>
-
               </div>
-
               <div class="col-6 col-md-4 d-flex align-items-end">
-
                 <span class="text-secondary small ms-auto" id="advTotalCountText"></span>
-
               </div>
-
             </div>
-
           </div>
-
-
-
-          <!-- Estado "Searching..." -->
 
           <div id="advSearchingStatus" class="text-center text-secondary my-4" style="display:none; font-size:0.9rem;">
-
             Searching...
-
           </div>
-
-
-
-          <!-- Contenedor de Skeletons o Resultados Globales -->
 
           <div class="row g-4" id="advResultsGrid"></div>
-
         </div>
-
-
 
         <!-- TAB 4: MONITORED STREAMERS -->
-
         <div id="tab-monitored" class="sub-tab" style="display:none;">
-
           <div class="kpi-card mb-4">
-
             <h5 class="fw-bold mb-2">Add Streamer</h5>
-
             <p class="text-secondary small mb-3">
-
               Enter a Twitch username or channel link to start recording automatically when they go live.
-
             </p>
-
             <div class="d-flex gap-2" style="max-width:500px;">
-
               <input type="text" id="inputNuevoStreamerTab" class="auth-input py-2" placeholder="e.g. illojuan" onkeydown="if(event.key==='Enter') agregarStreamerMonitoreado('inputNuevoStreamerTab')">
-
               <button class="btn-purple" onclick="agregarStreamerMonitoreado('inputNuevoStreamerTab')">Add</button>
-
             </div>
-
           </div>
-
           <div class="row g-3" id="listaCanalesMonitoreados"></div>
-
         </div>
-
       </main>
-
     </div>
-
   </div>
-
-
 
   <!-- MODAL REPRODUCTOR -->
-
   <div class="modal fade" id="reproductorModal" tabindex="-1" aria-hidden="true">
-
     <div class="modal-dialog modal-xl modal-dialog-centered">
-
       <div class="modal-content" style="background: var(--bg-card); border: 1px solid var(--border-color);">
-
         <div class="modal-header border-secondary border-opacity-25">
-
           <h6 class="modal-title fw-bold m-0" id="modalTitulo">Stream Playback</h6>
-
           <div class="ms-auto me-3 btn-group btn-group-sm" id="selectorServidorGroup" style="display:none;">
-
             <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('drive')">Server 1</button>
-
             <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('archive')">Server 2</button>
-
           </div>
-
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-
         </div>
-
         <div class="modal-body p-0 bg-black">
-
-          <div class="ratio ratio-16x9" id="contenedorIframe"></div>
-
+          <div class="ratio ratio-16x9 position-relative" id="contenedorIframe"></div>
         </div>
-
         <div class="modal-footer border-secondary border-opacity-25 d-flex justify-content-between">
-
           <span class="text-secondary small" id="modalMeta"></span>
-
           <a href="#" id="modalBotonDrive" target="_blank" class="btn-purple btn-sm text-decoration-none">
-
             <i class="fa-solid fa-download me-2"></i>Download MP4
-
           </a>
-
         </div>
-
       </div>
-
     </div>
-
   </div>
 
-
-
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-
-<script>
+  <script>
     const SUPABASE_URL = "https://gdbhnosrfsayyevfdjde.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkYmhub3NyZnNheXlldmZkamRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwMjcwNTEsImV4cCI6MjEwNzYwMzA1MX0.zdapm_CZx_aYBrEy4bnjvogDFu7Jg0Cg0x4Cw7ZiLfY";
     
@@ -1439,6 +723,7 @@
     let modoAuthActual = 'login';
     let videoModalActual = null;
     let timerBusquedaAdv = null;
+    let hlsInstance = null;
 
     // Reloj del sidebar inferior
     setInterval(() => {
@@ -1721,7 +1006,6 @@
         document.getElementById('dashboardLiveBox').innerHTML = emptyHtml;
         document.getElementById('listaCanalesMonitoreados').innerHTML = emptyHtml;
       } else {
-        // Tarjetas limpias sin botones Stop ni Restart (Solo contador automático en vivo y botón de eliminar)
         const cardsHtml = streamersMonitoreados.map(st => {
           const estaGrabando = Boolean(st.grabando_ahora);
           const badgeEstado = estaGrabando
@@ -1764,11 +1048,12 @@
 
     function crearTarjetaHTML(v, idx, mostrarDescarga, origen = 'privado') {
       const esEnVivo = v.duracion === 'LIVE' || v.drive_id === 'LIVE';
-      const inicioIso = (v.url_directa && v.url_directa.startsWith('LIVE_DVR:')) ? v.url_directa.replace('LIVE_DVR:', '') : '';
+      const inicioIso = (v.url_permanente && v.url_permanente.startsWith('START:'))
+        ? v.url_permanente.replace('START:', '')
+        : ((v.url_directa && v.url_directa.startsWith('LIVE_DVR:')) ? v.url_directa.replace('LIVE_DVR:', '') : '');
       const linkDrive = (!esEnVivo && v.drive_id) ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_permanente || '#');
       const colClass = origen === 'global' ? 'col-12 col-md-6 col-xl-4' : 'col-12 col-sm-6 col-lg-4 col-xl-3';
 
-      // Si está en vivo, refresca la miniatura en vivo de Twitch cada minuto
       const thumbSrc = esEnVivo
         ? `https://static-cdn.jtvnw.net/previews-ttv/live_user_${v.streamer}-640x360.jpg?t=${Math.floor(Date.now() / 60000)}`
         : (v.miniatura || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80');
@@ -1796,7 +1081,7 @@
                   </div>
                   <div class="d-flex gap-1 flex-wrap mt-2">
                     <span class="badge-cat">${v.categoria || 'Just Chatting'}</span>
-                    <span class="badge-res">${esEnVivo ? 'LIVE DVR (Rewind Enabled)' : (v.calidad || '1080p60')}</span>
+                    <span class="badge-res">${esEnVivo ? 'LIVE DVR' : (v.calidad || '1080p60')}</span>
                   </div>
                 </div>
               </div>
@@ -1908,15 +1193,20 @@
       inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
-    // Reproductor Híbrido: Soporta DVR en Simultáneo (con barra para atrasar el directo) y VOD Finalizado
-    async function abrirModalVideo(idx, origen = 'privado') {
+    // Reproductor Híbrido: Soporta DVR propio en vivo con HLS (Estilo Kick) y VOD Finalizado
+    function abrirModalVideo(idx, origen = 'privado') {
       const lista = origen === 'global' ? resultadosAvanzados : videosGlobal;
       const v = lista[idx];
       if (!v) return;
       videoModalActual = v;
 
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+
       const esEnVivo = v.duracion === 'LIVE' || v.drive_id === 'LIVE';
-      document.getElementById('modalTitulo').innerText = esEnVivo ? `🔴 LIVE DVR: ${v.titulo}` : v.titulo;
+      document.getElementById('modalTitulo').innerText = v.titulo;
       document.getElementById('modalMeta').innerText = `${v.streamer} • ${v.fecha}`;
 
       const btnDescarga = document.getElementById('modalBotonDrive');
@@ -1926,14 +1216,11 @@
         btnDescarga.style.display = 'none';
         grupoServidores.style.display = 'inline-flex';
         grupoServidores.innerHTML = `
-          <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarModoDVRVivo('rewind')">
-            <i class="fa-solid fa-clock-rotate-left me-1"></i>DVR Rewind (Seek Bar)
-          </button>
-          <button type="button" class="btn btn-outline-danger btn-sm" onclick="cambiarModoDVRVivo('live')">
-            <i class="fa-solid fa-tower-broadcast me-1"></i>Real-Time Live
+          <button type="button" class="btn btn-danger btn-sm" onclick="saltarAlVivoDVR()">
+            <i class="fa-solid fa-circle fa-fade me-1" style="font-size:0.55rem;"></i>Jump to Live Edge
           </button>`;
         new bootstrap.Modal(document.getElementById('reproductorModal')).show();
-        await cambiarModoDVRVivo('rewind');
+        iniciarReproductorKickDVR(v.url_directa);
       } else {
         btnDescarga.style.display = 'inline-block';
         const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
@@ -1954,40 +1241,67 @@
       }
     }
 
-    // Permite atrasar el directo en curso desde el minuto 00:00 o ver la señal en vivo
-    async function cambiarModoDVRVivo(modo) {
-      const v = videoModalActual;
-      if (!v) return;
+    // Reproductor DVR estilo Kick: Reproduce tu propia grabación HLS en vivo con barra para retroceder sin silencios de Twitch
+    function iniciarReproductorKickDVR(m3u8Url) {
       const iframeCont = document.getElementById('contenedorIframe');
-      const parentHost = window.location.hostname || 'localhost';
+      iframeCont.innerHTML = `
+        <video id="kickDvrVideo" controls autoplay playsinline style="width:100%; height:100%; background:#000;"></video>
+        <div id="dvrBufferingMsg" class="position-absolute top-50 start-50 translate-middle text-center bg-dark bg-opacity-75 p-3 rounded-3" style="display:none; pointer-events:none;">
+          <div class="spinner-border text-primary spinner-border-sm mb-2" role="status"></div>
+          <div class="small text-light">Synchronizing live DVR buffer...</div>
+        </div>`;
 
-      if (modo === 'rewind') {
-        try {
-          // Consulta el ID del buffer de transmisión actual para habilitar la barra de retroceso (DVR Seek Bar)
-          const resp = await fetch('https://gql.twitch.tv/gql', {
-            method: 'POST',
-            headers: { 'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko', 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              query: `{ user(login: "${v.streamer}") { videos(first: 1, type: ARCHIVE) { edges { node { id } } } } }`
-            })
+      const video = document.getElementById('kickDvrVideo');
+      const msg = document.getElementById('dvrBufferingMsg');
+
+      function cargarFlujoHLS() {
+        const urlConCacheBust = `${m3u8Url}?t=${Date.now()}`;
+        if (window.Hls && Hls.isSupported()) {
+          if (hlsInstance) hlsInstance.destroy();
+          hlsInstance = new Hls({
+            liveSyncDurationCount: 3,
+            enableWorker: true
           });
-          const json = await resp.json();
-          const activeVodId = json?.data?.user?.videos?.edges?.[0]?.node?.id;
-
-          if (activeVodId) {
-            iframeCont.innerHTML = `<iframe src="https://player.twitch.tv/?video=${activeVodId}&parent=${parentHost}&autoplay=true" allowfullscreen allow="autoplay; fullscreen"></iframe>`;
-            return;
-          }
-        } catch (e) {}
+          hlsInstance.loadSource(urlConCacheBust);
+          hlsInstance.attachMedia(video);
+          hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+            msg.style.display = 'none';
+            video.play().catch(() => {});
+          });
+          hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal) {
+              // Si el directo acaba de empezar hace < 15 segundos y el primer segmento aún se está subiendo, reintenta solo
+              msg.style.display = 'block';
+              setTimeout(cargarFlujoHLS, 5000);
+            }
+          });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = urlConCacheBust;
+          video.addEventListener('loadedmetadata', () => {
+            msg.style.display = 'none';
+            video.play().catch(() => {});
+          });
+        }
       }
 
-      // Si el streamer tiene desactivados los archivos en Twitch o el usuario elige Real-Time Live, muestra la señal en directo
-      iframeCont.innerHTML = `<iframe src="https://player.twitch.tv/?channel=${v.streamer}&parent=${parentHost}&autoplay=true" allowfullscreen allow="autoplay; fullscreen"></iframe>`;
+      cargarFlujoHLS();
+    }
+
+    function saltarAlVivoDVR() {
+      const video = document.getElementById('kickDvrVideo');
+      if (video && video.duration) {
+        video.currentTime = Math.max(0, video.duration - 3);
+        video.play().catch(() => {});
+      }
     }
 
     function cambiarServidorReproductor(servidor) {
       const v = videoModalActual;
       if (!v) return;
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
       const iframeCont = document.getElementById('contenedorIframe');
       if (servidor === 'drive' && v.drive_id) {
         iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
@@ -1997,12 +1311,14 @@
     }
 
     document.getElementById('reproductorModal').addEventListener('hidden.bs.modal', () => {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
       document.getElementById('contenedorIframe').innerHTML = '';
     });
 
     inicializarApp();
   </script>
-
 </body>
-
 </html>
