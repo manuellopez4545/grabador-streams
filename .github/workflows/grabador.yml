@@ -1,4 +1,4 @@
-name: Grabador Multi-Streamer Cloud Infinito v5.2
+name: Grabador Multi-Streamer Full Stream DVR v6.0
 
 on:
   workflow_dispatch:
@@ -30,7 +30,8 @@ jobs:
           if [ -n "$MANUAL" ]; then
             STREAMERS=$(echo "$MANUAL" | tr '[:upper:]' '[:lower:]')
           else
-            STREAMERS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?activo=eq.true&select=streamer" \
+            # Detecta todos los streamers que tengan al menos 1 usuario monitoreándolos (sin duplicar)
+            STREAMERS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?select=streamer" \
               -H "apikey: $SB_KEY" \
               -H "Authorization: Bearer $SB_KEY" | jq -r '.[].streamer' | tr '[:upper:]' '[:lower:]' | sort -u | head -n 20)
           fi
@@ -56,7 +57,7 @@ jobs:
           LISTA_JSON="[]"
           for CANAL in $STREAMERS; do
             if echo "$JOBS_ACTIVOS" | grep -qi "grabar ($CANAL)"; then
-              echo "⏭️ $CANAL ya se está grabando. Saltando..."
+              echo "⏭️ $CANAL ya se está grabando en otra instancia activa. Saltando..."
               continue
             fi
 
@@ -83,7 +84,7 @@ jobs:
     needs: radar
     if: needs.radar.outputs.hay_canales == 'si'
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 355
     strategy:
       fail-fast: false
       matrix:
@@ -92,16 +93,18 @@ jobs:
     name: grabar (${{ matrix.canal }})
 
     steps:
-      - name: 1. Descargar repositorio
+      - name: 1. Descargar repositorio y liberar espacio máximo para streams largos
         uses: actions/checkout@v4
 
-      - name: 2. Instalar herramientas
+      - name: 2. Instalar herramientas y ampliar disco para directos de +5 horas
         run: |
+          # Liberar ~12 GB extra de herramientas preinstaladas de GitHub que no usamos
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3-pip jq
           pip3 install --upgrade streamlink
 
-      - name: 3. Conectar con Google Drive + Internet Archive (Ilimitado)
+      - name: 3. Conectar con Google Drive + Internet Archive
         env:
           TOKEN: ${{ secrets.RCLONE_TOKEN }}
           IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
@@ -120,23 +123,28 @@ jobs:
           secret_access_key = $IA_SECRET
           EOF
 
-      - name: 4. Obtener metadatos, activar cronómetro y Grabar a ${{ matrix.canal }}
+      - name: 4. Publicar Stream En Vivo en la Web y Grabar Directo Completo de ${{ matrix.canal }}
         env:
           CANAL: ${{ matrix.canal }}
           SB_URL: ${{ secrets.SUPABASE_URL }}
           SB_KEY: ${{ secrets.SUPABASE_KEY }}
+          REPO: ${{ github.repository }}
         run: |
           mkdir -p grabaciones thumbs
           FECHA_CARPETA=$(date +"%Y-%m-%d")
           HORA_INICIO=$(date +"%H-%M-%S")
+          FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
           AHORA_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          ARCHIVO_TS="grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}_Completo.ts"
+
           echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
+          echo "ARCHIVO_TS=$ARCHIVO_TS" >> $GITHUB_ENV
 
           INFO_TWITCH=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
             -X POST https://gql.twitch.tv/gql \
             -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){profileImageURL(width:70) stream{title game{name}}}}\"}")
           
-          TITULO=$(echo "$INFO_TWITCH" | jq -r '.data.user.stream.title // "Directo Sin Copyright"')
+          TITULO=$(echo "$INFO_TWITCH" | jq -r '.data.user.stream.title // "Live Stream"')
           CATEGORIA=$(echo "$INFO_TWITCH" | jq -r '.data.user.stream.game.name // "Just Chatting"')
           AVATAR=$(echo "$INFO_TWITCH" | jq -r '.data.user.profileImageURL // "https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png"')
 
@@ -144,77 +152,68 @@ jobs:
           echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
           echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
 
-          # Encender cronómetro SOLO en las filas donde el usuario tiene activo=true
-          curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true" \
+          # 1. Activar el contador LIVE en todos los usuarios que monitorean a este streamer
+          curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"avatar\": \"$AVATAR\", \"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\", \"forzar_corte\": false}" || true
+            -d "{\"avatar\": \"$AVATAR\", \"activo\": true, \"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\"}" || true
 
-          # Guardar lista inicial de usuarios que pidieron grabar este stream
-          USUARIOS_INIT=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&select=user_id" \
+          # 2. Obtener todos los usuarios que tienen asignado a este streamer
+          USUARIOS_INIT=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=user_id" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)] | unique')
-          echo "USUARIOS_ACTIVOS=$USUARIOS_INIT" >> $GITHUB_ENV
 
+          # 3. CREAR LA TARJETA "EN VIVO" EN LA WEB INMEDIATAMENTE (Para que puedan verlo y atrasarlo en simultáneo)
+          THUMB_LIVE="https://static-cdn.jtvnw.net/previews-ttv/live_user_${CANAL}-640x360.jpg"
+          BODY_LIVE=$(jq -n \
+            --arg st "$CANAL" \
+            --arg av "$AVATAR" \
+            --arg ti "$TITULO" \
+            --arg ca "$CATEGORIA" \
+            --arg fe "$FECHA_COMPLETA" \
+            --arg th "$THUMB_LIVE" \
+            --arg ul "LIVE_DVR:$AHORA_UTC" \
+            --argjson ua "$USUARIOS_INIT" \
+            '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:"LIVE", calidad:"1080p60", miniatura:$th, drive_id:"LIVE", url_directa:$ul, usuarios_activos:$ua}')
+
+          REGISTRO_CREADO=$(curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
+            -H "apikey: $SB_KEY" \
+            -H "Authorization: Bearer $SB_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=representation" \
+            -d "$BODY_LIVE")
+
+          VOD_ID_ACTUAL=$(echo "$REGISTRO_CREADO" | jq -r '.[0].id // empty')
+          echo "VOD_ID_ACTUAL=$VOD_ID_ACTUAL" >> $GITHUB_ENV
+
+          # 4. Vigilante en segundo plano: solo detiene si TODOS los usuarios eliminan al streamer de su lista
           (
             while true; do
-              sleep 15
-              # Consultar estado de todos los usuarios que monitorean este canal
-              ESTADO_CANAL=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=user_id,activo,forzar_corte" \
+              sleep 20
+              CANT_USUARIOS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=id" \
                 -H "apikey: $SB_KEY" \
-                -H "Authorization: Bearer $SB_KEY")
+                -H "Authorization: Bearer $SB_KEY" | jq 'length')
 
-              SIGUE_ACTIVO=$(echo "$ESTADO_CANAL" | jq '[.[] | select(.activo == true)] | length')
-              PIDIO_REINICIO=$(echo "$ESTADO_CANAL" | jq '[.[] | select(.forzar_corte == true)] | length')
-
-              # Si NINGÚN usuario lo tiene activo (todos dieron Stop), detener grabación
-              if [ "$SIGUE_ACTIVO" -eq 0 ]; then
-                echo "🛑 Todos los usuarios detuvieron la grabación de $CANAL. Cerrando archivo..."
+              if [ "$CANT_USUARIOS" -eq 0 ]; then
+                echo "🛑 Ya ningún usuario tiene asignado a $CANAL. Cerrando grabación..."
                 pkill -INT -f "streamlink" || true
                 break
-              fi
-
-              # Si algún usuario presionó "Restart", limpiar bandera y cortar archivo para guardarlo ya
-              if [ "$PIDIO_REINICIO" -gt 0 ]; then
-                echo "🔄 Reinicio solicitado desde la web. Guardando segmento actual..."
-                curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
-                  -H "apikey: $SB_KEY" \
-                  -H "Authorization: Bearer $SB_KEY" \
-                  -H "Content-Type: application/json" \
-                  -d "{\"forzar_corte\": false}" || true
-                pkill -INT -f "streamlink" || true
-                break
-              fi
-
-              # Sincronizar reloj para nuevos usuarios que le hayan dado Resume a mitad del directo
-              curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&grabando_ahora=eq.false" \
-                -H "apikey: $SB_KEY" \
-                -H "Authorization: Bearer $SB_KEY" \
-                -H "Content-Type: application/json" \
-                -d "{\"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\"}" || true
-
-              TOTAL_TS=$(ls -1 grabaciones/*.ts 2>/dev/null | wc -l)
-              if [ "$TOTAL_TS" -gt 1 ]; then
-                for archivo in $(ls -1tr grabaciones/*.ts | head -n -1); do
-                  nombre_mp4="${archivo%.ts}.mp4"
-                  ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
-                  rclone copy "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
-                done
               fi
             done
           ) &
-          SUBIDOR_PID=$!
+          VIGILANTE_PID=$!
 
-          timeout 18000s bash -c "streamlink https://www.twitch.tv/$CANAL best \
+          # 5. GRABACIÓN CONTINUA EN UN SOLO ARCHIVO COMPLETO (Sin partir por horas)
+          timeout 19800s bash -c "streamlink https://www.twitch.tv/$CANAL best \
             --twitch-disable-ads \
             --stream-segment-timeout 15 \
-            --stream-timeout 20 \
-            -O | ffmpeg -i pipe:0 -c copy -f segment -segment_time 3600 -reset_timestamps 1 grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}_Parte_%02d.ts" || true
+            --stream-timeout 25 \
+            -O > \"$ARCHIVO_TS\"" || true
 
-          kill $SUBIDOR_PID 2>/dev/null || true
-          
-      - name: 5. Subir a Drive + Archivo Infinito y Apagar Cronómetro
+          kill $VIGILANTE_PID 2>/dev/null || true
+
+      - name: 5. Empaquetar Directo Completo, Subir a la Nube y Dejar Guardado en la Web
         if: always()
         env:
           CANAL: ${{ matrix.canal }}
@@ -223,61 +222,75 @@ jobs:
           IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
           REPO: ${{ github.repository }}
         run: |
-          # Obtener usuarios finales que seguían con la grabación activa o la iniciaron
-          USUARIOS_FIN=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&activo=eq.true&select=user_id" \
-            -H "apikey: $SB_KEY" \
-            -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)]')
-          
-          # Combinar usuarios que estuvieron activos al inicio o al final del stream
-          LISTA_USUARIOS=$(jq -c -n --argjson u1 "${USUARIOS_ACTIVOS:-[]}" --argjson u2 "${USUARIOS_FIN:-[]}" '($u1 + $u2) | unique')
-
-          # Apagar el indicador 'grabando_ahora' al terminar
+          # 1. Apagar el contador de vivo en las tarjetas de monitoreo
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"grabando_ahora\": false, \"inicio_grabacion\": null, \"forzar_corte\": false}" || true
+            -d "{\"grabando_ahora\": false, \"inicio_grabacion\": null}" || true
 
-          if [ -d "grabaciones" ]; then
-            for archivo in grabaciones/*.ts; do
-              [ -e "$archivo" ] || continue
-              nombre_mp4="${archivo%.ts}.mp4"
-              ffmpeg -y -i "$archivo" -c copy "$nombre_mp4" && rm "$archivo"
-            done
+          if [ -f "$ARCHIVO_TS" ]; then
+            nombre_mp4="${ARCHIVO_TS%.ts}.mp4"
+            NOMBRE_BASE=$(basename "$nombre_mp4")
+            NOMBRE_THUMB="thumbs/${NOMBRE_BASE%.mp4}.jpg"
 
-            for nombre_mp4 in grabaciones/*.mp4; do
-              [ -e "$nombre_mp4" ] || continue
-              NOMBRE_BASE=$(basename "$nombre_mp4")
-              NOMBRE_THUMB="thumbs/${NOMBRE_BASE%.mp4}.jpg"
+            echo "Convirtiendo directo completo a MP4 único..."
+            ffmpeg -y -i "$ARCHIVO_TS" -c copy -movflags +faststart "$nombre_mp4" && rm "$ARCHIVO_TS"
 
-              ffmpeg -y -ss 00:00:05 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
-              DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
+            # Extraer miniatura definitiva y calcular duración total del directo completo
+            ffmpeg -y -ss 00:00:10 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
+            DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
 
-              URL_PERMANENTE=""
-              if [ -n "$IA_ACCESS" ]; then
-                BUCKET_IA="sr-vod-${CANAL}-${FECHA_CARPETA}"
-                rclone copy "$nombre_mp4" "archivo_infinito:$BUCKET_IA/" --ignore-errors || true
-                URL_PERMANENTE="https://archive.org/download/$BUCKET_IA/$NOMBRE_BASE"
-              fi
+            # Subir a Internet Archive (Respaldo Ilimitado)
+            URL_PERMANENTE=""
+            if [ -n "$IA_ACCESS" ]; then
+              BUCKET_IA="sr-vod-${CANAL}-${FECHA_CARPETA}"
+              rclone copy "$nombre_mp4" "archivo_infinito:$BUCKET_IA/" --ignore-errors || true
+              URL_PERMANENTE="https://archive.org/download/$BUCKET_IA/$NOMBRE_BASE"
+            fi
 
-              rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
-              LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "$URL_PERMANENTE")
-              DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
+            # Subir a Google Drive
+            rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
+            LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "$URL_PERMANENTE")
+            DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
 
-              if [ -f "$NOMBRE_THUMB" ]; then
-                git pull origin main --rebase || true
-                git config user.name "StreamRecorder Bot"
-                git config user.email "bot@streamrecorder.local"
-                git add "$NOMBRE_THUMB"
-                git commit -m "Thumb $NOMBRE_BASE" || true
-                git push origin main || true
-                MINIATURA_URL="https://raw.githubusercontent.com/$REPO/main/$NOMBRE_THUMB"
-              else
-                MINIATURA_URL="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80"
-              fi
+            # Subir miniatura a GitHub
+            if [ -f "$NOMBRE_THUMB" ]; then
+              git pull origin main --rebase || true
+              git config user.name "StreamRecorder Bot"
+              git config user.email "bot@streamrecorder.local"
+              git add "$NOMBRE_THUMB"
+              git commit -m "Thumb $NOMBRE_BASE" || true
+              git push origin main || true
+              MINIATURA_URL="https://raw.githubusercontent.com/$REPO/main/$NOMBRE_THUMB"
+            else
+              MINIATURA_URL="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80"
+            fi
 
+            # Lista actualizada de usuarios que tienen asignado al streamer
+            USUARIOS_FIN=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=user_id" \
+              -H "apikey: $SB_KEY" \
+              -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)] | unique')
+
+            BODY_FINAL=$(jq -n \
+              --arg du "$DURACION" \
+              --arg th "$MINIATURA_URL" \
+              --arg di "$DRIVE_ID" \
+              --arg ul "$LINK_DRIVE" \
+              --arg up "$URL_PERMANENTE" \
+              --argjson ua "$USUARIOS_FIN" \
+              '{duracion:$du, miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
+
+            # Actualizar la MISMA tarjeta que estaba en modo "LIVE" para que quede guardada como VOD final
+            if [ -n "$VOD_ID_ACTUAL" ]; then
+              curl -s -X PATCH "$SB_URL/rest/v1/grabaciones?id=eq.$VOD_ID_ACTUAL" \
+                -H "apikey: $SB_KEY" \
+                -H "Authorization: Bearer $SB_KEY" \
+                -H "Content-Type: application/json" \
+                -d "$BODY_FINAL"
+            else
               FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
-              BODY_JSON=$(jq -n \
+              BODY_NEW=$(jq -n \
                 --arg st "$CANAL" \
                 --arg av "$AVATAR_STREAM" \
                 --arg ti "$TITULO_STREAM" \
@@ -288,14 +301,13 @@ jobs:
                 --arg di "$DRIVE_ID" \
                 --arg ul "$LINK_DRIVE" \
                 --arg up "$URL_PERMANENTE" \
-                --argjson ua "$LISTA_USUARIOS" \
+                --argjson ua "$USUARIOS_FIN" \
                 '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
-
               curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
                 -H "apikey: $SB_KEY" \
                 -H "Authorization: Bearer $SB_KEY" \
                 -H "Content-Type: application/json" \
-                -d "$BODY_JSON"
-              echo "¡Video guardado en Drive y publicado en la web con éxito!"
-            done
+                -d "$BODY_NEW"
+            fi
+            echo "✅ Directo completo guardado y actualizado en la web."
           fi
