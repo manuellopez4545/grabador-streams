@@ -1,4 +1,4 @@
-name: Grabador Multi-Streamer Full Stream DVR v6.0
+name: Grabador Multi-Streamer Kick-DVR v7.0
 
 on:
   workflow_dispatch:
@@ -30,7 +30,6 @@ jobs:
           if [ -n "$MANUAL" ]; then
             STREAMERS=$(echo "$MANUAL" | tr '[:upper:]' '[:lower:]')
           else
-            # Detecta todos los streamers que tengan al menos 1 usuario monitoreándolos (sin duplicar)
             STREAMERS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?select=streamer" \
               -H "apikey: $SB_KEY" \
               -H "Authorization: Bearer $SB_KEY" | jq -r '.[].streamer' | tr '[:upper:]' '[:lower:]' | sort -u | head -n 20)
@@ -57,7 +56,7 @@ jobs:
           LISTA_JSON="[]"
           for CANAL in $STREAMERS; do
             if echo "$JOBS_ACTIVOS" | grep -qi "grabar ($CANAL)"; then
-              echo "⏭️ $CANAL ya se está grabando en otra instancia activa. Saltando..."
+              echo "⏭️ $CANAL ya se está grabando. Saltando..."
               continue
             fi
 
@@ -93,12 +92,11 @@ jobs:
     name: grabar (${{ matrix.canal }})
 
     steps:
-      - name: 1. Descargar repositorio y liberar espacio máximo para streams largos
+      - name: 1. Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: 2. Instalar herramientas y ampliar disco para directos de +5 horas
+      - name: 2. Liberar espacio y preparar herramientas
         run: |
-          # Liberar ~12 GB extra de herramientas preinstaladas de GitHub que no usamos
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3-pip jq
@@ -123,23 +121,37 @@ jobs:
           secret_access_key = $IA_SECRET
           EOF
 
-      - name: 4. Publicar Stream En Vivo en la Web y Grabar Directo Completo de ${{ matrix.canal }}
+      - name: 4. Grabar con DVR en Simultáneo (HLS Event Sin Copyright) a ${{ matrix.canal }}
         env:
           CANAL: ${{ matrix.canal }}
           SB_URL: ${{ secrets.SUPABASE_URL }}
           SB_KEY: ${{ secrets.SUPABASE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          mkdir -p grabaciones thumbs
           FECHA_CARPETA=$(date +"%Y-%m-%d")
           HORA_INICIO=$(date +"%H-%M-%S")
           FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
           AHORA_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          ARCHIVO_TS="grabaciones/${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}_Completo.ts"
+          SESSION_ID="${CANAL}_${FECHA_CARPETA}_${HORA_INICIO}"
+          DVR_DIR="/tmp/dvr_repo/dvr/${SESSION_ID}"
 
           echo "FECHA_CARPETA=$FECHA_CARPETA" >> $GITHUB_ENV
-          echo "ARCHIVO_TS=$ARCHIVO_TS" >> $GITHUB_ENV
+          echo "SESSION_ID=$SESSION_ID" >> $GITHUB_ENV
+          echo "DVR_DIR=$DVR_DIR" >> $GITHUB_ENV
 
+          # 1. Preparar rama separada 'live-dvr' para transmitir los segmentos del DVR en vivo
+          git config --global user.name "StreamRecorder DVR"
+          git config --global user.email "dvr@streamrecorder.local"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" /tmp/dvr_repo
+          cd /tmp/dvr_repo
+          git checkout --orphan live-dvr 2>/dev/null || git checkout -B live-dvr
+          git rm -rf . 2>/dev/null || true
+          mkdir -p "$DVR_DIR"
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p thumbs
+
+          # 2. Obtener datos del directo en Twitch
           INFO_TWITCH=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
             -X POST https://gql.twitch.tv/gql \
             -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){profileImageURL(width:70) stream{title game{name}}}}\"}")
@@ -152,20 +164,21 @@ jobs:
           echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
           echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
 
-          # 1. Activar el contador LIVE en todos los usuarios que monitorean a este streamer
+          # 3. Encender contador en vivo en Supabase
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"avatar\": \"$AVATAR\", \"activo\": true, \"grabando_ahora\": true, \"inicio_grabacion\": \"$AHORA_UTC\"}" || true
 
-          # 2. Obtener todos los usuarios que tienen asignado a este streamer
           USUARIOS_INIT=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=user_id" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)] | unique')
 
-          # 3. CREAR LA TARJETA "EN VIVO" EN LA WEB INMEDIATAMENTE (Para que puedan verlo y atrasarlo en simultáneo)
+          # 4. Crear tarjeta LIVE en Supabase apuntando a nuestro propio archivo index.m3u8 sin copyright
+          M3U8_URL="https://raw.githubusercontent.com/${REPO}/live-dvr/dvr/${SESSION_ID}/index.m3u8"
           THUMB_LIVE="https://static-cdn.jtvnw.net/previews-ttv/live_user_${CANAL}-640x360.jpg"
+
           BODY_LIVE=$(jq -n \
             --arg st "$CANAL" \
             --arg av "$AVATAR" \
@@ -173,9 +186,10 @@ jobs:
             --arg ca "$CATEGORIA" \
             --arg fe "$FECHA_COMPLETA" \
             --arg th "$THUMB_LIVE" \
-            --arg ul "LIVE_DVR:$AHORA_UTC" \
+            --arg ul "$M3U8_URL" \
+            --arg up "START:$AHORA_UTC" \
             --argjson ua "$USUARIOS_INIT" \
-            '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:"LIVE", calidad:"1080p60", miniatura:$th, drive_id:"LIVE", url_directa:$ul, usuarios_activos:$ua}')
+            '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:"LIVE", calidad:"1080p60", miniatura:$th, drive_id:"LIVE", url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
 
           REGISTRO_CREADO=$(curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
             -H "apikey: $SB_KEY" \
@@ -187,61 +201,74 @@ jobs:
           VOD_ID_ACTUAL=$(echo "$REGISTRO_CREADO" | jq -r '.[0].id // empty')
           echo "VOD_ID_ACTUAL=$VOD_ID_ACTUAL" >> $GITHUB_ENV
 
-          # 4. Vigilante en segundo plano: solo detiene si TODOS los usuarios eliminan al streamer de su lista
+          # 5. Subidor en tiempo real: Cada 15 segundos sincroniza los nuevos segmentos .ts y el index.m3u8
+          # para que cualquier usuario en la web pueda ver y retroceder el directo con audio original
           (
             while true; do
-              sleep 20
+              sleep 15
               CANT_USUARIOS=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=id" \
                 -H "apikey: $SB_KEY" \
                 -H "Authorization: Bearer $SB_KEY" | jq 'length')
 
               if [ "$CANT_USUARIOS" -eq 0 ]; then
-                echo "🛑 Ya ningún usuario tiene asignado a $CANAL. Cerrando grabación..."
                 pkill -INT -f "streamlink" || true
                 break
               fi
+
+              if [ -f "$DVR_DIR/index.m3u8" ]; then
+                cd /tmp/dvr_repo
+                git add "dvr/${SESSION_ID}/" 2>/dev/null || true
+                if ! git diff --cached --quiet; then
+                  git commit -m "DVR sync $SESSION_ID" >/dev/null 2>&1 || true
+                  git push -f origin live-dvr >/dev/null 2>&1 || true
+                fi
+              fi
             done
           ) &
-          VIGILANTE_PID=$!
+          DVR_SYNC_PID=$!
 
-          # 5. GRABACIÓN CONTINUA EN UN SOLO ARCHIVO COMPLETO (Sin partir por horas)
+          # 6. Captura en formato HLS EVENT (Permite retroceder desde 00:00 mientras sigue en vivo y unir todo en 1 MP4 al final)
           timeout 19800s bash -c "streamlink https://www.twitch.tv/$CANAL best \
             --twitch-disable-ads \
             --stream-segment-timeout 15 \
             --stream-timeout 25 \
-            -O > \"$ARCHIVO_TS\"" || true
+            -O | ffmpeg -y -i pipe:0 -c copy \
+            -f hls -hls_time 10 -hls_playlist_type event -hls_list_size 0 \
+            -hls_segment_filename \"$DVR_DIR/seg_%05d.ts\" \
+            \"$DVR_DIR/index.m3u8\"" || true
 
-          kill $VIGILANTE_PID 2>/dev/null || true
+          kill $DVR_SYNC_PID 2>/dev/null || true
 
-      - name: 5. Empaquetar Directo Completo, Subir a la Nube y Dejar Guardado en la Web
+      - name: 5. Unir en 1 Solo MP4 Completo, Subir a Drive/Archive y Limpiar Buffer DVR
         if: always()
         env:
           CANAL: ${{ matrix.canal }}
           SB_URL: ${{ secrets.SUPABASE_URL }}
           SB_KEY: ${{ secrets.SUPABASE_KEY }}
           IA_ACCESS: ${{ secrets.IA_ACCESS_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          # 1. Apagar el contador de vivo en las tarjetas de monitoreo
+          # 1. Apagar el indicador de vivo en Supabase
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"grabando_ahora\": false, \"inicio_grabacion\": null}" || true
 
-          if [ -f "$ARCHIVO_TS" ]; then
-            nombre_mp4="${ARCHIVO_TS%.ts}.mp4"
-            NOMBRE_BASE=$(basename "$nombre_mp4")
-            NOMBRE_THUMB="thumbs/${NOMBRE_BASE%.mp4}.jpg"
+          if [ -f "$DVR_DIR/index.m3u8" ]; then
+            NOMBRE_BASE="${SESSION_ID}_Completo.mp4"
+            nombre_mp4="/tmp/${NOMBRE_BASE}"
+            NOMBRE_THUMB="thumbs/${SESSION_ID}_Completo.jpg"
 
-            echo "Convirtiendo directo completo a MP4 único..."
-            ffmpeg -y -i "$ARCHIVO_TS" -c copy -movflags +faststart "$nombre_mp4" && rm "$ARCHIVO_TS"
+            echo "Uniendo todos los segmentos del directo en 1 solo archivo MP4 completo..."
+            ffmpeg -y -i "$DVR_DIR/index.m3u8" -c copy -movflags +faststart "$nombre_mp4"
 
-            # Extraer miniatura definitiva y calcular duración total del directo completo
+            # Extraer miniatura y duración total
             ffmpeg -y -ss 00:00:10 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
             DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
 
-            # Subir a Internet Archive (Respaldo Ilimitado)
+            # Subir a Internet Archive
             URL_PERMANENTE=""
             if [ -n "$IA_ACCESS" ]; then
               BUCKET_IA="sr-vod-${CANAL}-${FECHA_CARPETA}"
@@ -249,16 +276,15 @@ jobs:
               URL_PERMANENTE="https://archive.org/download/$BUCKET_IA/$NOMBRE_BASE"
             fi
 
-            # Subir a Google Drive
+            # Subir el MP4 único completo a Google Drive
             rclone move "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/"
             LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "$URL_PERMANENTE")
             DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
 
-            # Subir miniatura a GitHub
+            # Subir miniatura a rama main
+            cd "$GITHUB_WORKSPACE"
             if [ -f "$NOMBRE_THUMB" ]; then
               git pull origin main --rebase || true
-              git config user.name "StreamRecorder Bot"
-              git config user.email "bot@streamrecorder.local"
               git add "$NOMBRE_THUMB"
               git commit -m "Thumb $NOMBRE_BASE" || true
               git push origin main || true
@@ -267,7 +293,6 @@ jobs:
               MINIATURA_URL="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80"
             fi
 
-            # Lista actualizada de usuarios que tienen asignado al streamer
             USUARIOS_FIN=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&select=user_id" \
               -H "apikey: $SB_KEY" \
               -H "Authorization: Bearer $SB_KEY" | jq -c '[.[].user_id | select(. != null)] | unique')
@@ -281,33 +306,18 @@ jobs:
               --argjson ua "$USUARIOS_FIN" \
               '{duracion:$du, miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
 
-            # Actualizar la MISMA tarjeta que estaba en modo "LIVE" para que quede guardada como VOD final
+            # Transformar la tarjeta LIVE en el VOD permanente finalizado
             if [ -n "$VOD_ID_ACTUAL" ]; then
               curl -s -X PATCH "$SB_URL/rest/v1/grabaciones?id=eq.$VOD_ID_ACTUAL" \
                 -H "apikey: $SB_KEY" \
                 -H "Authorization: Bearer $SB_KEY" \
                 -H "Content-Type: application/json" \
                 -d "$BODY_FINAL"
-            else
-              FECHA_COMPLETA=$(date +"%Y-%m-%d %H:%M:%S")
-              BODY_NEW=$(jq -n \
-                --arg st "$CANAL" \
-                --arg av "$AVATAR_STREAM" \
-                --arg ti "$TITULO_STREAM" \
-                --arg ca "$CATEGORIA_STREAM" \
-                --arg fe "$FECHA_COMPLETA" \
-                --arg du "$DURACION" \
-                --arg th "$MINIATURA_URL" \
-                --arg di "$DRIVE_ID" \
-                --arg ul "$LINK_DRIVE" \
-                --arg up "$URL_PERMANENTE" \
-                --argjson ua "$USUARIOS_FIN" \
-                '{streamer:$st, avatar:$av, titulo:$ti, categoria:$ca, fecha:$fe, duracion:$du, calidad:"1080p60", miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
-              curl -s -X POST "$SB_URL/rest/v1/grabaciones" \
-                -H "apikey: $SB_KEY" \
-                -H "Authorization: Bearer $SB_KEY" \
-                -H "Content-Type: application/json" \
-                -d "$BODY_NEW"
             fi
-            echo "✅ Directo completo guardado y actualizado en la web."
+
+            # Limpiar los segmentos temporales de la rama live-dvr
+            cd /tmp/dvr_repo
+            git rm -rf "dvr/${SESSION_ID}" 2>/dev/null || true
+            git commit -m "Clean finished DVR $SESSION_ID" 2>/dev/null || true
+            git push -f origin live-dvr 2>/dev/null || true
           fi
