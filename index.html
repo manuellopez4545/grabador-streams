@@ -707,13 +707,13 @@
     const SUPABASE_URL = "https://gdbhnosrfsayyevfdjde.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkYmhub3NyZnNheXlldmZkamRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwMjcwNTEsImV4cCI6MjEwNzYwMzA1MX0.zdapm_CZx_aYBrEy4bnjvogDFu7Jg0Cg0x4Cw7ZiLfY";
     
-    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true
       }
-    });
+    }) : null;
 
     let videosGlobal = [];
     let resultadosAvanzados = [];
@@ -724,6 +724,7 @@
     let videoModalActual = null;
     let timerBusquedaAdv = null;
     let hlsInstance = null;
+    let dvrRefreshInterval = null;
 
     // Reloj del sidebar inferior
     setInterval(() => {
@@ -761,12 +762,30 @@
     }, 15000);
 
     async function inicializarApp() {
-      const { data: { session } } = await db.auth.getSession();
-      verificarAccesoObligatorio(session?.user || null);
+      if (!db) {
+        const alerta = document.getElementById('alertaAuth');
+        if (alerta) {
+          alerta.innerText = 'Error loading connection service. Please refresh the page.';
+          alerta.style.display = 'block';
+        }
+        return;
+      }
 
-      db.auth.onAuthStateChange((_event, session) => {
-        verificarAccesoObligatorio(session?.user || null);
-      });
+      try {
+        const { data, error } = await db.auth.getSession();
+        if (!error) {
+          verificarAccesoObligatorio(data?.session?.user || null);
+        } else {
+          verificarAccesoObligatorio(null);
+        }
+
+        db.auth.onAuthStateChange((_event, session) => {
+          verificarAccesoObligatorio(session?.user || null);
+        });
+      } catch (err) {
+        console.error('Initialization error:', err);
+        verificarAccesoObligatorio(null);
+      }
     }
 
     async function verificarAccesoObligatorio(user) {
@@ -779,14 +798,17 @@
       }
 
       const nombre = user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.preferred_username || user.user_metadata?.username || (user.email ? user.email.split('@')[0] : 'User');
-      document.getElementById('userNameDisplay').innerText = nombre;
-      document.getElementById('userInitial').innerText = nombre.charAt(0).toUpperCase();
+      const nameEl = document.getElementById('userNameDisplay');
+      const initEl = document.getElementById('userInitial');
+      if (nameEl) nameEl.innerText = nombre;
+      if (initEl) initEl.innerText = nombre.charAt(0).toUpperCase();
       
       cambiarVista('vista-app');
       await cargarDatosPrivadosUsuario();
     }
 
     async function loginOAuthOIDC(proveedor) {
+      if (!db) return;
       const alerta = document.getElementById('alertaAuth');
       alerta.style.display = 'none';
       const opciones = { redirectTo: window.location.origin + window.location.pathname };
@@ -800,7 +822,7 @@
     }
 
     async function cargarDatosPrivadosUsuario() {
-      if (!usuarioActual) return;
+      if (!usuarioActual || !db) return;
       try {
         const { data: stData, error: errSt } = await db
           .from('streamers_monitoreados')
@@ -808,7 +830,7 @@
           .eq('user_id', usuarioActual.id)
           .order('created_at', { ascending: false });
 
-        streamersMonitoreados = (!errSt && stData) ? stData : [];
+        streamersMonitoreados = (!errSt && Array.isArray(stData)) ? stData : [];
 
         const misCanales = streamersMonitoreados.map(s => s.streamer.toLowerCase());
         if (misCanales.length > 0) {
@@ -818,18 +840,22 @@
             .in('streamer', misCanales)
             .order('created_at', { ascending: false });
 
-          videosGlobal = (!errVid && vidData) ? vidData : [];
+          videosGlobal = (!errVid && Array.isArray(vidData)) ? vidData : [];
         } else {
           videosGlobal = [];
         }
       } catch (e) {
-        console.error(e);
+        console.error('Error loading user data:', e);
       }
       actualizarTodoUI();
     }
 
     function mostrarSkeletonsBusqueda(cantidad = 6) {
-      document.getElementById('advSearchingStatus').style.display = 'block';
+      const statusEl = document.getElementById('advSearchingStatus');
+      const gridEl = document.getElementById('advResultsGrid');
+      if (statusEl) statusEl.style.display = 'block';
+      if (!gridEl) return;
+
       let html = '';
       for (let i = 0; i < cantidad; i++) {
         html += `
@@ -847,7 +873,7 @@
             </div>
           </div>`;
       }
-      document.getElementById('advResultsGrid').innerHTML = html;
+      gridEl.innerHTML = html;
     }
 
     function dispararBusquedaAvanzada() {
@@ -859,6 +885,7 @@
     }
 
     async function ejecutarBusquedaGlobalSupabase() {
+      if (!db) return;
       const canalQuery = (document.getElementById('advSearchInput')?.value || '').trim().toLowerCase();
       const catQuery = (document.getElementById('advCategoryInput')?.value || '').trim().toLowerCase();
       const orden = document.getElementById('advSortOrder')?.value || 'newest';
@@ -874,7 +901,8 @@
         if (catQuery.length > 0) query = query.ilike('categoria', `%${catQuery}%`);
 
         const { data, error } = await query;
-        document.getElementById('advSearchingStatus').style.display = 'none';
+        const statusEl = document.getElementById('advSearchingStatus');
+        if (statusEl) statusEl.style.display = 'none';
 
         if (error || !data || data.length === 0) {
           resultadosAvanzados = [];
@@ -892,14 +920,16 @@
           .map((v, idx) => crearTarjetaHTML(v, idx, true, 'global'))
           .join('');
       } catch (err) {
-        document.getElementById('advSearchingStatus').style.display = 'none';
+        const statusEl = document.getElementById('advSearchingStatus');
+        if (statusEl) statusEl.style.display = 'none';
       }
     }
 
     async function agregarStreamerMonitoreado(idInput) {
-      if (!usuarioActual) return cambiarVista('vista-auth');
+      if (!usuarioActual || !db) return cambiarVista('vista-auth');
 
       const inp = document.getElementById(idInput);
+      if (!inp) return;
       const canal = inp.value.trim().toLowerCase()
         .replace('https://www.twitch.tv/', '')
         .replace('https://twitch.tv/', '')
@@ -914,14 +944,18 @@
         return alert('You have reached the maximum limit of 5 monitored streamers.');
       }
 
-      // Verificar si otro usuario ya tenía a este streamer grabándose en vivo en este instante
-      const { data: yaExistente } = await db
-        .from('streamers_monitoreados')
-        .select('avatar, grabando_ahora, inicio_grabacion')
-        .eq('streamer', canal)
-        .limit(1);
+      let estadoPrevio = {};
+      try {
+        const { data: yaExistente, error: errExist } = await db
+          .from('streamers_monitoreados')
+          .select('avatar, grabando_ahora, inicio_grabacion')
+          .eq('streamer', canal)
+          .limit(1);
 
-      const estadoPrevio = (yaExistente && yaExistente.length > 0) ? yaExistente[0] : {};
+        if (!errExist && Array.isArray(yaExistente) && yaExistente.length > 0) {
+          estadoPrevio = yaExistente[0];
+        }
+      } catch (e) {}
 
       const autor = usuarioActual.user_metadata?.username || usuarioActual.email || 'user';
       const { error } = await db.from('streamers_monitoreados').insert([{
@@ -930,7 +964,7 @@
         user_id: usuarioActual.id,
         activo: true,
         avatar: estadoPrevio.avatar || 'https://static-cdn.jtvnw.net/user-default-pictures-uv/cdd517fe-def4-11e9-948e-784f43822e80-profile_image-70x70.png',
-        grabando_ahora: estadoPrevio.grabando_ahora || false,
+        grabando_ahora: Boolean(estadoPrevio.grabando_ahora),
         inicio_grabacion: estadoPrevio.inicio_grabacion || null
       }]);
 
@@ -943,6 +977,7 @@
     }
 
     async function eliminarStreamerMonitoreado(id) {
+      if (!usuarioActual || !db) return;
       if (!confirm('Remove this channel from your monitored list?')) return;
       await db.from('streamers_monitoreados').delete().eq('id', id).eq('user_id', usuarioActual.id);
       await cargarDatosPrivadosUsuario();
@@ -950,6 +985,7 @@
 
     async function procesarAuthReal(e) {
       e.preventDefault();
+      if (!db) return;
       const email = document.getElementById('authEmail').value.trim();
       const password = document.getElementById('authPass').value;
       const username = document.getElementById('authUsername').value.trim();
@@ -981,7 +1017,7 @@
     }
 
     async function cerrarSesionReal() {
-      await db.auth.signOut();
+      if (db) await db.auth.signOut();
       verificarAccesoObligatorio(null);
     }
 
@@ -1051,7 +1087,7 @@
       const inicioIso = (v.url_permanente && v.url_permanente.startsWith('START:'))
         ? v.url_permanente.replace('START:', '')
         : ((v.url_directa && v.url_directa.startsWith('LIVE_DVR:')) ? v.url_directa.replace('LIVE_DVR:', '') : '');
-      const linkDrive = (!esEnVivo && v.drive_id) ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_permanente || '#');
+      const linkDrive = (!esEnVivo && v.drive_id) ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_permanente || v.url_directa || '#');
       const colClass = origen === 'global' ? 'col-12 col-md-6 col-xl-4' : 'col-12 col-sm-6 col-lg-4 col-xl-3';
 
       const thumbSrc = esEnVivo
@@ -1098,9 +1134,9 @@
       const showDl = document.getElementById('chkDownloadBtns')?.checked ?? true;
 
       let filtrados = videosGlobal.filter(v =>
-        v.streamer.toLowerCase().includes(q) ||
-        v.titulo.toLowerCase().includes(q) ||
-        v.fecha.toLowerCase().includes(q)
+        (v.streamer || '').toLowerCase().includes(q) ||
+        (v.titulo || '').toLowerCase().includes(q) ||
+        (v.fecha || '').toLowerCase().includes(q)
       );
 
       if (recOrder === 'oldest') filtrados.reverse();
@@ -1112,8 +1148,20 @@
         return;
       }
 
+      // Contabilizar cantidad por streamer para aplicar ordenamiento tanto en Grid como en List
+      const conteoPorStreamer = {};
+      filtrados.forEach(v => {
+        conteoPorStreamer[v.streamer] = (conteoPorStreamer[v.streamer] || 0) + 1;
+      });
+
       if (vistaRecActual === 'grid') {
-        cont.innerHTML = `<div class="row g-4">${filtrados.map(v => crearTarjetaHTML(v, videosGlobal.indexOf(v), showDl, 'privado')).join('')}</div>`;
+        const listaGrid = [...filtrados];
+        if (sortBy === 'name') {
+          listaGrid.sort((a, b) => a.streamer.localeCompare(b.streamer));
+        } else if (sortBy === 'count') {
+          listaGrid.sort((a, b) => (conteoPorStreamer[b.streamer] || 0) - (conteoPorStreamer[a.streamer] || 0));
+        }
+        cont.innerHTML = `<div class="row g-4">${listaGrid.map(v => crearTarjetaHTML(v, videosGlobal.indexOf(v), showDl, 'privado')).join('')}</div>`;
       } else {
         const grupos = {};
         filtrados.forEach(v => {
@@ -1121,7 +1169,7 @@
           grupos[v.streamer].push(v);
         });
         let nombres = Object.keys(grupos);
-        if (sortBy === 'name') nombres.sort();
+        if (sortBy === 'name') nombres.sort((a, b) => a.localeCompare(b));
         if (sortBy === 'count') nombres.sort((a, b) => grupos[b].length - grupos[a].length);
 
         cont.innerHTML = nombres.map((st, sIdx) => {
@@ -1156,23 +1204,27 @@
 
     function cambiarVista(id) {
       document.querySelectorAll('.vista-seccion').forEach(el => el.classList.remove('activa'));
-      document.getElementById(id).classList.add('activa');
+      const target = document.getElementById(id);
+      if (target) target.classList.add('activa');
       window.scrollTo(0, 0);
     }
 
     function mostrarTab(id) {
       if (!usuarioActual) return cambiarVista('vista-auth');
       document.querySelectorAll('.sub-tab').forEach(el => el.style.display = 'none');
-      document.getElementById(id).style.display = 'block';
+      const tabEl = document.getElementById(id);
+      if (tabEl) tabEl.style.display = 'block';
+
       document.querySelectorAll('.nav-item-side').forEach(el => el.classList.remove('active'));
-      if (id === 'tab-dashboard') document.getElementById('menu-dashboard').classList.add('active');
-      if (id === 'tab-recordings') document.getElementById('menu-recordings').classList.add('active');
+      if (id === 'tab-dashboard') document.getElementById('menu-dashboard')?.classList.add('active');
+      if (id === 'tab-recordings') document.getElementById('menu-recordings')?.classList.add('active');
       if (id === 'tab-advanced') {
-        document.getElementById('menu-advanced').classList.add('active');
-        document.getElementById('advSearchInput').focus();
+        document.getElementById('menu-advanced')?.classList.add('active');
+        const advInp = document.getElementById('advSearchInput');
+        if (advInp) advInp.focus();
         if (resultadosAvanzados.length === 0) dispararBusquedaAvanzada();
       }
-      if (id === 'tab-monitored') document.getElementById('menu-monitored').classList.add('active');
+      if (id === 'tab-monitored') document.getElementById('menu-monitored')?.classList.add('active');
     }
 
     function modoAuth(modo) {
@@ -1190,7 +1242,39 @@
     function alternarModoAuth() { modoAuth(modoAuthActual === 'login' ? 'register' : 'login'); }
     function togglePassword() {
       const inp = document.getElementById('authPass');
-      inp.type = inp.type === 'password' ? 'text' : 'password';
+      if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    function limpiarInstanciasDVR() {
+      if (dvrRefreshInterval) {
+        clearInterval(dvrRefreshInterval);
+        dvrRefreshInterval = null;
+      }
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+    }
+
+    // Obtiene la URL fresca del manifiesto HLS resolviendo el último SHA de la rama live-dvr para evitar caché de GitHub CDN
+    async function obtenerUrlM3u8SinCache(rawUrl) {
+      if (!rawUrl) return '';
+      const cleanUrl = rawUrl.split('?')[0];
+      try {
+        const match = cleanUrl.match(/raw\.githubusercontent\.com\/([^/]+\/[^/]+)\/live-dvr\/(.+)$/);
+        if (match) {
+          const repo = match[1];
+          const path = match[2];
+          const commitResp = await fetch(`https://api.github.com/repos/${repo}/commits/live-dvr?t=${Date.now()}`);
+          if (commitResp.ok) {
+            const commitData = await commitResp.json();
+            if (commitData && commitData.sha) {
+              return `https://raw.githubusercontent.com/${repo}/${commitData.sha}/${path}`;
+            }
+          }
+        }
+      } catch (e) {}
+      return `${cleanUrl}?_cb=${Date.now()}`;
     }
 
     // Reproductor Híbrido: Soporta DVR propio en vivo con HLS (Estilo Kick) y VOD Finalizado
@@ -1200,10 +1284,7 @@
       if (!v) return;
       videoModalActual = v;
 
-      if (hlsInstance) {
-        hlsInstance.destroy();
-        hlsInstance = null;
-      }
+      limpiarInstanciasDVR();
 
       const esEnVivo = v.duracion === 'LIVE' || v.drive_id === 'LIVE';
       document.getElementById('modalTitulo').innerText = v.titulo;
@@ -1223,31 +1304,33 @@
         iniciarReproductorKickDVR(v.url_directa);
       } else {
         btnDescarga.style.display = 'inline-block';
-        const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_directa || '#');
+        const linkDrive = v.drive_id ? `https://drive.google.com/file/d/${v.drive_id}/view` : (v.url_permanente || v.url_directa || '#');
         btnDescarga.href = linkDrive;
 
-        const tieneAmbos = v.drive_id && v.url_permanente && v.url_permanente.startsWith('http');
-        grupoServidores.style.display = tieneAmbos ? 'inline-flex' : 'none';
+        const tieneDrive = Boolean(v.drive_id && v.drive_id !== 'LIVE');
+        const tieneArchive = Boolean(v.url_permanente && v.url_permanente.startsWith('http'));
+        grupoServidores.style.display = (tieneDrive && tieneArchive) ? 'inline-flex' : 'none';
         grupoServidores.innerHTML = `
           <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('drive')">Server 1</button>
           <button type="button" class="btn btn-outline-light btn-sm" onclick="cambiarServidorReproductor('archive')">Server 2</button>`;
 
-        if (v.drive_id) {
+        if (tieneDrive) {
           cambiarServidorReproductor('drive');
-        } else if (v.url_permanente) {
+        } else if (tieneArchive) {
           cambiarServidorReproductor('archive');
+        } else {
+          cambiarServidorReproductor('fallback');
         }
         new bootstrap.Modal(document.getElementById('reproductorModal')).show();
       }
     }
 
-    // Reproductor DVR estilo Kick: Reproduce tu propia grabación HLS en vivo con barra para retroceder sin silencios de Twitch
-// Reproductor DVR estilo Kick con anti-caché en cada actualización del manifiesto
-    function iniciarReproductorKickDVR(m3u8Url) {
+    // Reproductor DVR estilo Kick sin mutación peligrosa de xhr.open
+    async function iniciarReproductorKickDVR(m3u8Url) {
       const iframeCont = document.getElementById('contenedorIframe');
       iframeCont.innerHTML = `
         <video id="kickDvrVideo" controls autoplay playsinline style="width:100%; height:100%; background:#000;"></video>
-        <div id="dvrBufferingMsg" class="position-absolute top-50 start-50 translate-middle text-center bg-dark bg-opacity-75 p-3 rounded-3" style="display:none; pointer-events:none;">
+        <div id="dvrBufferingMsg" class="position-absolute top-50 start-50 translate-middle text-center bg-dark bg-opacity-75 p-3 rounded-3" style="display:block; pointer-events:none;">
           <div class="spinner-border text-primary spinner-border-sm mb-2" role="status"></div>
           <div class="small text-light">Synchronizing live DVR buffer...</div>
         </div>`;
@@ -1255,10 +1338,10 @@
       const video = document.getElementById('kickDvrVideo');
       const msg = document.getElementById('dvrBufferingMsg');
 
-      // Limpiar cualquier parámetro previo de la URL base
-      const cleanM3u8Url = m3u8Url.split('?')[0];
+      async function cargarFlujoHLS(irAlBordeVivo = false) {
+        const freshUrl = await obtenerUrlM3u8SinCache(m3u8Url);
+        if (!freshUrl) return;
 
-      function cargarFlujoHLS() {
         if (window.Hls && Hls.isSupported()) {
           if (hlsInstance) hlsInstance.destroy();
           
@@ -1266,91 +1349,70 @@
             liveSyncDurationCount: 2,
             liveMaxLatencyDurationCount: 5,
             enableWorker: true,
-            manifestLoadingTimeOut: 15000,
-            // Fuerza a que cada recarga periódica del .m3u8 ignore la caché de GitHub
-            xhrSetup: function(xhr, url) {
-              if (url.includes('.m3u8')) {
-                const sep = url.includes('?') ? '&' : '?';
-                xhr.open('GET', `${url}${sep}_cb=${Date.now()}`, true);
-              }
-            }
+            manifestLoadingTimeOut: 15000
           });
 
-          hlsInstance.loadSource(cleanM3u8Url);
+          hlsInstance.loadSource(freshUrl);
           hlsInstance.attachMedia(video);
 
           hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-            msg.style.display = 'none';
+            if (msg) msg.style.display = 'none';
+            if (irAlBordeVivo) {
+              setTimeout(() => {
+                const target = hlsInstance.liveSyncPosition || (video.duration ? Math.max(0, video.duration - 2) : 0);
+                if (target > 0) video.currentTime = target;
+              }, 120);
+            }
             video.play().catch(() => {});
           });
 
           hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
             if (data.fatal) {
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                msg.style.display = 'block';
-                setTimeout(() => {
-                  if (hlsInstance) hlsInstance.startLoad();
-                  else cargarFlujoHLS();
-                }, 4000);
+                if (msg) msg.style.display = 'block';
+                setTimeout(() => cargarFlujoHLS(false), 4000);
               } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 hlsInstance.recoverMediaError();
               } else {
-                setTimeout(cargarFlujoHLS, 4000);
+                setTimeout(() => cargarFlujoHLS(false), 4000);
               }
             }
           });
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = `${cleanM3u8Url}?_cb=${Date.now()}`;
+        } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = freshUrl;
           video.addEventListener('loadedmetadata', () => {
-            msg.style.display = 'none';
+            if (msg) msg.style.display = 'none';
+            if (irAlBordeVivo && video.duration) {
+              video.currentTime = Math.max(0, video.duration - 2);
+            }
             video.play().catch(() => {});
-          });
+          }, { once: true });
+        } else if (msg) {
+          msg.innerHTML = `<div class="small text-warning">HLS playback is not supported in this browser.</div>`;
         }
       }
 
-      cargarFlujoHLS();
+      await cargarFlujoHLS(true);
     }
 
-    // Fuerza la recarga del manifiesto más reciente y salta al último segundo disponible en vivo
+    // Recarga el último commit de la rama live-dvr y salta al último segundo disponible en vivo
     async function saltarAlVivoDVR() {
       const video = document.getElementById('kickDvrVideo');
       const v = videoModalActual;
       if (!video || !v) return;
 
-      const tiempoPrevio = video.currentTime;
-
-      if (hlsInstance) {
-        // Si GitHub Raw tiene cacheado el manifiesto, consultamos el último commit de la rama live-dvr vía API
-        try {
-          const match = v.url_directa.match(/raw\.githubusercontent\.com\/([^/]+\/[^/]+)\/live-dvr\/(.+)$/);
-          if (match) {
-            const repo = match[1];
-            const path = match[2].split('?')[0];
-            const carpetaDvr = path.substring(0, path.lastIndexOf('/'));
-            const commitResp = await fetch(`https://api.github.com/repos/${repo}/commits/live-dvr?t=${Date.now()}`);
-            if (commitResp.ok) {
-              const commitData = await commitResp.json();
-              const sha = commitData.sha;
-              // Usar el SHA exacto del último commit rompe el 100% de la caché de GitHub CDN al instante
-              const freshUrl = `https://raw.githubusercontent.com/${repo}/${sha}/${carpetaDvr}/index.m3u8`;
-              
-              hlsInstance.loadSource(freshUrl);
-              hlsInstance.once(Hls.Events.MANIFEST_PARSED, () => {
-                setTimeout(() => {
-                  const target = hlsInstance.liveSyncPosition || (video.duration ? video.duration - 2 : tiempoPrevio);
-                  video.currentTime = Math.max(0, target);
-                  video.play().catch(() => {});
-                }, 150);
-              });
-              return;
-            }
-          }
-        } catch (e) {}
-
-        // Respaldo estándar si no requiere cambio de SHA
-        hlsInstance.startLoad();
-        const pos = hlsInstance.liveSyncPosition || (video.duration ? video.duration - 2 : 0);
-        if (pos > 0) video.currentTime = pos;
+      const freshUrl = await obtenerUrlM3u8SinCache(v.url_directa);
+      if (hlsInstance && freshUrl) {
+        hlsInstance.loadSource(freshUrl);
+        hlsInstance.once(Hls.Events.MANIFEST_PARSED, () => {
+          setTimeout(() => {
+            const target = hlsInstance.liveSyncPosition || (video.duration ? Math.max(0, video.duration - 2) : video.currentTime);
+            video.currentTime = Math.max(0, target);
+            video.play().catch(() => {});
+          }, 150);
+        });
+      } else if (video.duration) {
+        video.currentTime = Math.max(0, video.duration - 2);
         video.play().catch(() => {});
       }
     }
@@ -1358,27 +1420,40 @@
     function cambiarServidorReproductor(servidor) {
       const v = videoModalActual;
       if (!v) return;
-      if (hlsInstance) {
-        hlsInstance.destroy();
-        hlsInstance = null;
-      }
+      limpiarInstanciasDVR();
+
       const iframeCont = document.getElementById('contenedorIframe');
-      if (servidor === 'drive' && v.drive_id) {
+      const tieneDrive = Boolean(v.drive_id && v.drive_id !== 'LIVE');
+      const tieneArchive = Boolean(v.url_permanente && v.url_permanente.startsWith('http'));
+      const tieneDirecta = Boolean(v.url_directa && v.url_directa.startsWith('http') && !v.url_directa.includes('.m3u8'));
+
+      if (servidor === 'drive' && tieneDrive) {
         iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
-      } else if (v.url_permanente) {
+      } else if (servidor === 'archive' && tieneArchive) {
         iframeCont.innerHTML = `<video controls autoplay style="width:100%; height:100%; background:#000;"><source src="${v.url_permanente}" type="video/mp4"></video>`;
+      } else if (tieneDrive) {
+        iframeCont.innerHTML = `<iframe src="https://drive.google.com/file/d/${v.drive_id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+      } else if (tieneArchive) {
+        iframeCont.innerHTML = `<video controls autoplay style="width:100%; height:100%; background:#000;"><source src="${v.url_permanente}" type="video/mp4"></video>`;
+      } else if (tieneDirecta) {
+        iframeCont.innerHTML = `<video controls autoplay style="width:100%; height:100%; background:#000;"><source src="${v.url_directa}" type="video/mp4"></video>`;
+      } else {
+        iframeCont.innerHTML = `
+          <div class="d-flex flex-column align-items-center justify-content-center h-100 text-secondary p-4 text-center">
+            <i class="fa-solid fa-film fs-2 mb-2"></i>
+            <div>This recording is still being processed by the storage server. Please try again in a few minutes.</div>
+          </div>`;
       }
     }
 
     document.getElementById('reproductorModal').addEventListener('hidden.bs.modal', () => {
-      if (hlsInstance) {
-        hlsInstance.destroy();
-        hlsInstance = null;
-      }
+      limpiarInstanciasDVR();
       document.getElementById('contenedorIframe').innerHTML = '';
     });
 
-    inicializarApp();
+    window.addEventListener('DOMContentLoaded', () => {
+      inicializarApp().catch(console.error);
+    });
   </script>
 </body>
 </html>
