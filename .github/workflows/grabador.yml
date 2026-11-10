@@ -18,7 +18,6 @@ env:
 jobs:
   radar:
     runs-on: ubuntu-latest
-    # CANDADO 1: Impide que dos radares se ejecuten en el mismo segundo
     concurrency:
       group: radar-global-lock
       cancel-in-progress: false
@@ -49,7 +48,6 @@ jobs:
             exit 0
           fi
 
-          # CANDADO 2A: Consultar en GitHub ejecuciones 'in_progress' y 'queued'
           JOBS_ACTIVOS=""
           RUNS_IN_PROG=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$REPO/actions/runs?status=in_progress&per_page=50" | jq -r '.workflow_runs[].id')
           RUNS_QUEUED=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$REPO/actions/runs?status=queued&per_page=50" | jq -r '.workflow_runs[].id')
@@ -66,13 +64,11 @@ jobs:
           AHORA_EPOCH=$(date -u +%s)
 
           for CANAL in $STREAMERS; do
-            # Si NO es un Auto-Relevo de 5h (cron normal), bloquea si ya hay una máquina en GitHub
             if [ -z "$MANUAL" ] && echo "$JOBS_ACTIVOS" | grep -qi "grabar ($CANAL)"; then
               echo "⏭️ [Candado GitHub] $CANAL ya tiene un robot activo o en cola. Saltando..."
               continue
             fi
 
-            # CANDADO 2B: Verificar en Supabase si figura grabando_ahora=true hace menos de 5h (18000s)
             ESTADO_SB=$(curl -s "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL&grabando_ahora=eq.true&select=inicio_grabacion&limit=1" \
               -H "apikey: $SB_KEY" \
               -H "Authorization: Bearer $SB_KEY")
@@ -87,7 +83,6 @@ jobs:
               fi
             fi
 
-            # Verificar si realmente está EN VIVO en Twitch
             GQL=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
               -X POST https://gql.twitch.tv/gql \
               -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
@@ -180,16 +175,18 @@ jobs:
           echo "DVR_DIR=$DVR_DIR" >> $GITHUB_ENV
           echo "INICIO_EPOCH=$(date +%s)" >> $GITHUB_ENV
 
+          # Clonado ultrarrápido sin historial pesado
           git config --global user.name "StreamRecorder DVR"
           git config --global user.email "dvr@streamrecorder.local"
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" /tmp/dvr_repo
+          rm -rf /tmp/dvr_repo
+          mkdir -p /tmp/dvr_repo
           cd /tmp/dvr_repo
-          if git ls-remote --exit-code --heads origin live-dvr >/dev/null 2>&1; then
-            git fetch origin live-dvr
-            git checkout -B live-dvr origin/live-dvr
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git fetch --depth 1 origin live-dvr >/dev/null 2>&1; then
+            git checkout -q -B live-dvr FETCH_HEAD
           else
-            git checkout --orphan live-dvr
-            git rm -rf . 2>/dev/null || true
+            git checkout -q --orphan live-dvr
           fi
           mkdir -p "$DVR_DIR"
           cd "$GITHUB_WORKSPACE"
@@ -207,7 +204,6 @@ jobs:
           echo "CATEGORIA_STREAM=$CATEGORIA" >> $GITHUB_ENV
           echo "AVATAR_STREAM=$AVATAR" >> $GITHUB_ENV
 
-          # Encender candado y contador en vivo en Supabase
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
@@ -257,10 +253,9 @@ jobs:
 
               if [ -f "$DVR_DIR/index.m3u8" ]; then
                 cd /tmp/dvr_repo
-                git fetch origin live-dvr 2>/dev/null || true
                 git add "dvr/${SESSION_ID}/" 2>/dev/null || true
                 if ! git diff --cached --quiet; then
-                  git commit -m "DVR sync $SESSION_ID" >/dev/null 2>&1 || true
+                  git commit --amend -m "DVR sync $SESSION_ID" >/dev/null 2>&1 || git commit -m "DVR sync $SESSION_ID" >/dev/null 2>&1 || true
                   git push -f origin live-dvr >/dev/null 2>&1 || true
                 fi
               fi
@@ -268,7 +263,6 @@ jobs:
           ) &
           DVR_SYNC_PID=$!
 
-          # Grabación continua por 5 horas exactas (18000s)
           timeout 18000s bash -c "streamlink https://www.twitch.tv/$CANAL best \
             --twitch-disable-ads \
             --retry-streams 10 \
@@ -295,9 +289,6 @@ jobs:
           FIN_EPOCH=$(date +%s)
           TIEMPO_GRABADO=$((FIN_EPOCH - ${INICIO_EPOCH:-$FIN_EPOCH}))
 
-          # 1. RELEVO PARALELO EN EL SEGUNDO 1 (ANTES de convertir y subir a Drive/Archive):
-          # Si la máquina cumplió las ~5 horas (17500s) y el streamer sigue en vivo,
-          # liberamos el candado en Supabase y lanzamos la Máquina 2 YA MISMO mientras esta Máquina 1 sube el archivo pesado.
           SIGUE_VIVO=""
           if [ "$TIEMPO_GRABADO" -ge 17500 ]; then
             SIGUE_VIVO=$(curl -s -H "Client-ID: kimne78kx3ncx6brgo4mv6wki5h1ko" \
@@ -305,7 +296,6 @@ jobs:
               -d "{\"query\":\"{user(login:\\\"$CANAL\\\"){stream{id}}}\"}" | grep -o '"stream":{"id"' || true)
           fi
 
-          # Liberar candado en Supabase para que el relevo (o estado final) quede limpio
           curl -s -X PATCH "$SB_URL/rest/v1/streamers_monitoreados?streamer=eq.$CANAL" \
             -H "apikey: $SB_KEY" \
             -H "Authorization: Bearer $SB_KEY" \
@@ -320,7 +310,6 @@ jobs:
               -d "{\"ref\":\"main\",\"inputs\":{\"canal_manual\":\"$CANAL\"}}" || true
           fi
 
-          # 2. Ahora esta Máquina 1 se queda tranquilamente empaquetando y subiendo la Parte 1
           if [ -f "$DVR_DIR/index.m3u8" ]; then
             NOMBRE_BASE="${SESSION_ID}_Completo.mp4"
             nombre_mp4="/tmp/${NOMBRE_BASE}"
@@ -334,7 +323,6 @@ jobs:
             ffmpeg -y -ss 00:00:10 -i "$nombre_mp4" -frames:v 1 -q:v 4 -vf "scale=640:-1" "$NOMBRE_THUMB" 2>/dev/null || true
             DURACION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$nombre_mp4" | awk '{printf "%02d:%02d:%02d\n", int($1/3600), int(($1%3600)/60), int($1%60)}')
 
-            # Subir a Google Drive con transferencias paralelas aceleradas
             rclone copy "$nombre_mp4" "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/" --drive-chunk-size 64M --transfers 4
             LINK_DRIVE=$(rclone link "mi_drive:StreamsTwitch/$CANAL/$FECHA_CARPETA/$NOMBRE_BASE" 2>/dev/null || echo "")
             DRIVE_ID=$(echo "$LINK_DRIVE" | grep -o '[-_0-9a-zA-Z]\{25,\}' | head -n 1 || echo "")
@@ -369,7 +357,6 @@ jobs:
               --argjson ua "$USUARIOS_FIN" \
               '{duracion:$du, miniatura:$th, drive_id:$di, url_directa:$ul, url_permanente:$up, usuarios_activos:$ua}')
 
-            # Actualizar únicamente el ID exacto de esta sesión para no tocar la nueva tarjeta LIVE de la Máquina 2
             if [ -n "$VOD_ID_ACTUAL" ]; then
               curl -s -X PATCH "$SB_URL/rest/v1/grabaciones?id=eq.$VOD_ID_ACTUAL" \
                 -H "apikey: $SB_KEY" \
@@ -379,10 +366,11 @@ jobs:
             fi
 
             cd /tmp/dvr_repo
-            git pull origin live-dvr --rebase 2>/dev/null || true
-            git rm -rf "dvr/${SESSION_ID}" 2>/dev/null || true
-            git commit -m "Clean finished DVR $SESSION_ID" 2>/dev/null || true
-            git push origin live-dvr 2>/dev/null || true
+            git checkout --orphan temp_clean 2>/dev/null || true
+            git add -A 2>/dev/null || true
+            git commit --allow-empty -m "Clean finished DVR $SESSION_ID" 2>/dev/null || true
+            git branch -M temp_clean live-dvr 2>/dev/null || true
+            git push -f origin live-dvr 2>/dev/null || true
 
             if [ -n "$IA_ACCESS" ]; then
               rclone move "$nombre_mp4" "archivo_infinito:$BUCKET_IA/" --ignore-errors || true
